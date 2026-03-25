@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MCP Security Gateway Health</title>
+    <style>
+      body { margin: 0; font-family: "Segoe UI", Arial, sans-serif; background: linear-gradient(160deg, #08111e, #10233f); color: #eef6ff; }
+      .wrap { max-width: 1100px; margin: 0 auto; padding: 40px 24px; }
+      .panel { background: rgba(10, 24, 44, .86); border: 1px solid rgba(125,211,252,.18); border-radius: 24px; padding: 28px; box-shadow: 0 20px 80px rgba(0,0,0,.35); }
+      .eyebrow { color: #7dd3fc; text-transform: uppercase; letter-spacing: .12em; font-size: 12px; }
+      h1 { margin: 10px 0 20px; font-size: 48px; }
+      .grid { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; }
+      .card { background: rgba(5,16,31,.76); border: 1px solid rgba(125,211,252,.12); border-radius: 18px; padding: 18px; }
+      .label { color: #9cb4cc; font-size: 13px; margin-bottom: 8px; }
+      .value { font-size: 30px; font-weight: 700; }
+      .ok { color: #4ade80; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="panel">
+        <div class="eyebrow">Health Snapshot</div>
+        <h1>MCP Security Gateway is live</h1>
+        <div class="grid">
+          <div class="card"><div class="label">Service</div><div class="value">gateway</div></div>
+          <div class="card"><div class="label">Database</div><div class="value">sqlite</div></div>
+          <div class="card"><div class="label">Rate limit</div><div class="value">memory</div></div>
+          <div class="card"><div class="label">Status</div><div class="value ok">healthy</div></div>
+          <div class="card"><div class="label">Users</div><div class="value">3</div></div>
+          <div class="card"><div class="label">Servers</div><div class="value">3</div></div>
+          <div class="card"><div class="label">Requests</div><div class="value">3</div></div>
+          <div class="card"><div class="label">Incidents</div><div class="value">1</div></div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

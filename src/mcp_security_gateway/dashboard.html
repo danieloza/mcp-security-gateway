@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MCP Security Gateway</title>
+    <style>
+      :root { --bg:#09111f; --panel:rgba(12,26,47,.88); --border:rgba(125,211,252,.16); --text:#eef6ff; --muted:#9cb4cc; --accent:#7dd3fc; --warn:#fbbf24; --danger:#fb7185; --ok:#4ade80; }
+      body { margin:0; font-family:"Segoe UI",Arial,sans-serif; background:radial-gradient(circle at top left, rgba(125,211,252,.18), transparent 32%), linear-gradient(160deg,#07101d 0%,#0f1f38 48%,#09111f 100%); color:var(--text); }
+      .wrap { max-width:1080px; margin:0 auto; padding:48px 24px 72px; }
+      .hero,.panel { background:var(--panel); border:1px solid var(--border); border-radius:24px; box-shadow:0 18px 80px rgba(0,0,0,.35); }
+      .hero { padding:32px; margin-bottom:24px; }
+      .eyebrow { color:var(--accent); letter-spacing:.12em; text-transform:uppercase; font-size:12px; }
+      h1 { font-size:clamp(36px,6vw,62px); margin:12px 0; line-height:1.02; }
+      .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px,1fr)); gap:16px; margin-top:24px; }
+      .card,.row { background:rgba(6,16,29,.7); border:1px solid rgba(125,211,252,.12); border-radius:18px; padding:18px; }
+      .label { color:var(--muted); font-size:13px; margin-bottom:8px; }
+      .value { font-size:28px; font-weight:700; }
+      .panel { padding:24px; }
+      .rows { display:grid; gap:12px; }
+      .tag { display:inline-block; padding:4px 10px; border-radius:999px; font-size:12px; margin-right:8px; }
+      .ok { background:rgba(74,222,128,.15); color:var(--ok); }
+      .warn { background:rgba(251,191,36,.14); color:var(--warn); }
+      .danger { background:rgba(251,113,133,.14); color:var(--danger); }
+      code { color:var(--accent); background:rgba(125,211,252,.08); padding:2px 6px; border-radius:8px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <section class="hero">
+        <div class="eyebrow">MCP Governance Layer</div>
+        <h1>Security Gateway for MCP servers</h1>
+        <p>A backend-first guardrail service that sits between agents and MCP tools, enforcing scope, approvals, redaction, and rate limits before execution.</p>
+        <div class="grid">
+          <div class="card"><div class="label">Primary stack</div><div class="value">FastAPI</div></div>
+          <div class="card"><div class="label">Persistence</div><div class="value">SQLite</div></div>
+          <div class="card"><div class="label">State</div><div class="value">Redis-ready</div></div>
+          <div class="card"><div class="label">Primary concern</div><div class="value">MCP Guardrails</div></div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>What the gateway enforces</h2>
+        <div class="rows">
+          <div class="row"><span class="tag ok">Allow</span>Low-risk reads stay inside approved scope boundaries like <code>docs:read</code>.</div>
+          <div class="row"><span class="tag warn">Approval</span>Risky writes and high-sensitivity MCP targets are routed through a human approval queue.</div>
+          <div class="row"><span class="tag danger">Block</span>Privileged production actions and rate-limit abuse create incidents and never reach the tool layer.</div>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

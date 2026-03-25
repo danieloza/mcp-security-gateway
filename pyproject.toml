@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-security-gateway"
+version = "0.1.0"
+description = "FastAPI security gateway for MCP servers with policy enforcement, approvals, rate limiting, and audit trails."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0,<1.0.0",
+  "redis>=6.4.0,<7.0.0",
+  "uvicorn>=0.35.0,<1.0.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mcp_security_gateway = ["*.html"]
