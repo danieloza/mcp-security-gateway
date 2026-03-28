@@ -88,6 +88,24 @@ python -m pip install -e .
 python -m pytest -q
 ```
 
+## Proof Assets
+
+What you can inspect immediately:
+
+- dashboard proof: [`output/playwright/screen-01-dashboard.png`](output/playwright/screen-01-dashboard.png)
+- health proof: [`output/playwright/screen-02-health-proof.png`](output/playwright/screen-02-health-proof.png)
+- approval and incident proof: [`output/playwright/screen-03-ops-proof.png`](output/playwright/screen-03-ops-proof.png)
+- product framing: [`output/playwright/screen-04-product-proof.png`](output/playwright/screen-04-product-proof.png)
+- architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- case study: [`docs/CASE_STUDY.md`](docs/CASE_STUDY.md)
+
+## Verified Paths
+
+- low-risk read request -> approved
+- high-risk write request -> routed to approval
+- privileged production action -> blocked and escalated to incident
+- sensitive arguments are redacted before request records are persisted
+
 ## Architecture
 
 - gateway API: [main.py](/C:/Users/syfsy/projekty/mcp-security-gateway/src/mcp_security_gateway/main.py)
