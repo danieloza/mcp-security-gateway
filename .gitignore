@@ -4,3 +4,5 @@ __pycache__/
 .venv/
 data/*.db
 *.egg-info/
+output/
+docs/LINKEDIN_POST*.md
