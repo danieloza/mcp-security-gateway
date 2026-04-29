@@ -6,6 +6,8 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-Security_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![MCP](https://img.shields.io/badge/MCP-Guardrails-1F2937?style=for-the-badge)](#)
 
+![MCP Security Gateway dashboard](docs/assets/gateway-dashboard.png)
+
 ## Overview
 
 Teams want agents to call MCP tools in production. The missing layer is usually control:
@@ -92,12 +94,10 @@ python -m pytest -q
 
 What you can inspect immediately:
 
-- dashboard proof: [`output/playwright/screen-01-dashboard.png`](output/playwright/screen-01-dashboard.png)
-- health proof: [`output/playwright/screen-02-health-proof.png`](output/playwright/screen-02-health-proof.png)
-- approval and incident proof: [`output/playwright/screen-03-ops-proof.png`](output/playwright/screen-03-ops-proof.png)
-- product framing: [`output/playwright/screen-04-product-proof.png`](output/playwright/screen-04-product-proof.png)
+- dashboard proof: [`docs/assets/gateway-dashboard.png`](docs/assets/gateway-dashboard.png)
 - architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - case study: [`docs/CASE_STUDY.md`](docs/CASE_STUDY.md)
+- short Polish interview version: [`docs/README_SHORT_PL.md`](docs/README_SHORT_PL.md)
 
 ## Verified Paths
 
@@ -106,10 +106,15 @@ What you can inspect immediately:
 - privileged production action -> blocked and escalated to incident
 - sensitive arguments are redacted before request records are persisted
 
+## Interview Framing
+
+MCP Security Gateway is a backend gateway for controlling MCP tool access. It models policy enforcement, approvals, incidents, rate limiting, and redacted audit logs. The goal was to show the control and security layer around agent tool access, not just model invocation.
+
 ## Architecture
 
-- gateway API: [main.py](/C:/Users/syfsy/projekty/mcp-security-gateway/src/mcp_security_gateway/main.py)
-- policy engine: [services.py](/C:/Users/syfsy/projekty/mcp-security-gateway/src/mcp_security_gateway/services.py)
-- persistence layer: [repository.py](/C:/Users/syfsy/projekty/mcp-security-gateway/src/mcp_security_gateway/repository.py)
-- architecture notes: [ARCHITECTURE.md](/C:/Users/syfsy/projekty/mcp-security-gateway/docs/ARCHITECTURE.md)
-- case study: [CASE_STUDY.md](/C:/Users/syfsy/projekty/mcp-security-gateway/docs/CASE_STUDY.md)
+- gateway API: [main.py](src/mcp_security_gateway/main.py)
+- policy engine: [services.py](src/mcp_security_gateway/services.py)
+- persistence layer: [repository.py](src/mcp_security_gateway/repository.py)
+- architecture notes: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- case study: [CASE_STUDY.md](docs/CASE_STUDY.md)
+- short Polish interview version: [README_SHORT_PL.md](docs/README_SHORT_PL.md)
