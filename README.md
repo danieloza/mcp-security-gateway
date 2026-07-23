@@ -117,4 +117,3 @@ MCP Security Gateway is a backend gateway for controlling MCP tool access. It mo
 - persistence layer: [repository.py](src/mcp_security_gateway/repository.py)
 - architecture notes: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - case study: [CASE_STUDY.md](docs/CASE_STUDY.md)
-- short Polish interview version: [README_SHORT_PL.md](docs/README_SHORT_PL.md)
