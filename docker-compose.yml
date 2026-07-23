@@ -2,16 +2,38 @@ services:
   api:
     build: .
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
+      MSG_ENVIRONMENT: local
       MSG_DATABASE_URL: sqlite:////app/data/mcp_security_gateway.db
       MSG_REDIS_URL: redis://redis:6379/0
+      MSG_ALLOWED_HOSTS: 127.0.0.1,localhost
+      MSG_ALLOWED_ORIGINS: http://127.0.0.1:8000,http://localhost:8000
     volumes:
-      - ./data:/app/data
+      - gateway-data:/app/data
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  gateway-data:
