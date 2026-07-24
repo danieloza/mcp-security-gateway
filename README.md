@@ -1,119 +1,349 @@
 # MCP Security Gateway
 
-> FastAPI gateway for governing MCP tool access with auth, policy enforcement, approvals, rate limiting, and audit-friendly request logs.
+> Protocol-aware runtime firewall for verified MCP tool execution.
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-Security_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![MCP](https://img.shields.io/badge/MCP-Guardrails-1F2937?style=for-the-badge)](#)
+[![CI](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml)
+![Release](https://img.shields.io/badge/Release-v0.2.1-22C55E?style=for-the-badge)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-20_Passing-16A34A?style=for-the-badge)
+![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
+[![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
-![MCP Security Gateway dashboard](docs/assets/gateway-dashboard.png)
+[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
-## Overview
+![MCP Security Gateway operator console](docs/assets/gateway-dashboard.png)
 
-Teams want agents to call MCP tools in production. The missing layer is usually control:
+## What It Solves
 
-- who is allowed to call which MCP server
-- which tools require approval
-- what happens when a request exceeds scope or rate limits
-- how sensitive arguments are redacted before they hit logs
-- how incidents are created when policy is violated
+Agents can discover powerful MCP tools, but discovery is not authorization. A
+production control point must determine:
 
-MCP Security Gateway models that missing layer as a backend-first service.
+- which workload and tenant initiated the call;
+- whether the server, tool description, and JSON schema still match an approved
+  manifest;
+- whether the requested scope and arguments fit policy;
+- whether secrets or forbidden destinations appear in the call;
+- whether a human must approve the exact payload;
+- whether the approved call was modified, replayed, or executed twice;
+- what evidence proves the final outcome.
 
-## What This Project Proves
+MCP Security Gateway places that control point between an MCP client and a fixed
+tool execution adapter. It supports protocol-level `initialize`, `ping`,
+`tools/list`, and `tools/call`, then applies deterministic controls before any
+side effect.
 
-- policy enforcement around MCP tool access, not just model inference
-- deterministic guardrails for high-risk tools and privileged scopes
-- approval routing for risky requests
-- audit logs with secret redaction
-- per-key rate limiting with Redis-ready state
-- operator-friendly visibility into requests, incidents, and decisions
+## Product Demo
+
+This walkthrough is generated from the running gateway, not from mocked
+screens. It follows one governed request across policy evaluation,
+maker-checker approval, adversarial security tests, execution, and evidence.
+
+![MCP Security Gateway verified execution demo](docs/assets/mcp-security-gateway-demo.gif)
+
+| Stage | Control | Observable proof |
+| --- | --- | --- |
+| Request | Scope, environment, DLP, and rate policy | `executed`, `awaiting approval`, or `blocked` before side effects |
+| Approval | Maker-checker separation | Exact payload digest and assigned checker |
+| Attack testing | Deterministic MCP abuse cases | Rug pull, tampering, secret egress, SSRF, and key-storage checks |
+| Execution | One-time capability lease | Caller, manifest, arguments, policy, and expiry re-verified |
+| Evidence | HMAC-linked audit events | Policy, approval, and execution chain with integrity status |
+
+The operator-led version takes about 90 seconds. See the
+[presenter script](docs/DEMO_GUIDE.md) for the exact credential switches and
+talk track.
+
+## Verified Execution Flow
+
+```mermaid
+flowchart LR
+  Client["Agent / MCP client"] --> Transport["Streamable-style HTTP /mcp"]
+  Transport --> Identity["Workload identity"]
+  Identity --> Manifest["Pinned tool manifest"]
+  Manifest --> Policy["Scope + DLP + rate + environment policy"]
+  Policy -->|low risk| Execute["Controlled execution adapter"]
+  Policy -->|high risk| Approval["Maker-checker approval"]
+  Approval --> Lease["One-time capability lease"]
+  Lease --> Execute
+  Policy -->|deny| Incident["Incident"]
+  Execute --> Evidence["HMAC-chained evidence"]
+```
+
+Every governed request records:
+
+- random, non-enumerable identifiers;
+- tenant, workload, server, tool, scope, and policy version;
+- SHA-256 argument, manifest, and governed-request digests;
+- a redacted argument representation;
+- the policy trace and decision reason;
+- approval actor, lease expiry, execution result digest, and audit-chain events.
+
+## Security Capabilities
+
+### API key hygiene
+
+- raw credentials are accepted only at the request boundary;
+- SQLite stores SHA-256 digests, never recoverable API-key values;
+- legacy plaintext demo rows are migrated to digest-only storage;
+- API responses never expose credential material;
+- Redis rate-limit keys use an opaque subject digest rather than the credential;
+- production mode refuses an in-memory rate-limit fallback.
+
+The values in [Demo credentials](#demo-credentials) are intentionally public
+portfolio credentials, not secrets. They exist only to make the local walkthrough
+repeatable.
+
+### Tool Manifest Trust
+
+Tool names, descriptions, JSON schemas, required scopes, risk levels, and
+annotations are fingerprinted. Candidate changes produce a field-level diff.
+Security administrators can quarantine a drifted tool; a platform administrator
+must explicitly restore its trust state.
+
+MCP tool annotations are retained for interoperability and operator context, but
+the gateway does not treat server-provided hints as authorization.
+
+### Approval-bound capability leases
+
+High-risk calls are held before execution. An approved call receives a random,
+short-lived, one-use lease bound to:
+
+- tenant and requesting workload;
+- server, tool, scope, and policy version;
+- approved manifest digest;
+- exact argument digest;
+- complete governed-request digest.
+
+Changing the path, payload, tool schema, caller, or policy context invalidates
+execution. Reusing the lease is rejected.
+
+### MCP Attack Lab
+
+The operator console runs deterministic checks for:
+
+- tool-description rug pull / manifest drift;
+- argument substitution after approval;
+- secret-bearing tool arguments;
+- cloud-metadata SSRF destinations;
+- plaintext API-key persistence.
+
+## Operator Console
+
+The dashboard provides:
+
+- live MCP policy and execution traffic;
+- tool trust registry with manifest fingerprints;
+- maker-checker approval workbench;
+- one-time lease visibility without browser persistence;
+- attack-lab results;
+- request evidence timeline and chain-integrity status;
+- a four-call guided defense sequence for portfolio presentations.
+
+The UI keeps the entered credential only in JavaScript memory. It does not use
+cookies or browser storage.
+
+## Product Tour
+
+The screenshots below use a clean local database and the same API paths covered
+by the automated tests.
+
+### 1. Policy enforcement before execution
+
+![Policy decisions and pinned MCP tool manifests](docs/assets/policy-enforcement.png)
+
+One table separates policy decision from execution state. Safe knowledge access
+executes, a regulated write pauses, and forbidden production or secret-bearing
+calls are contained.
+
+### 2. Maker-checker approval bound to the payload
+
+![Maker-checker exact payload approval](docs/assets/approval-workbench.png)
+
+The reviewer sees the request identity, payload digest, maker, and checker.
+Approval creates a short-lived capability lease for that immutable payload only.
+
+### 3. Adversarial controls as executable evidence
+
+![MCP Attack Lab showing five verified controls](docs/assets/attack-lab.png)
+
+The Attack Lab verifies manifest rug-pull detection, post-approval argument
+tampering, secret exfiltration, cloud-metadata SSRF, and digest-only API-key
+storage.
+
+### 4. Tamper-evident evidence chain
+
+![Verified policy approval and execution evidence chain](docs/assets/evidence-chain.png)
+
+The evidence explorer links policy, approval, and execution events and verifies
+the organization audit chain before presenting the evidence-pack digest.
 
 ## API Surface
+
+### MCP protocol boundary
+
+- `POST /mcp` — `initialize`, `ping`, `tools/list`, and `tools/call`
+
+### Operator API
 
 - `GET /health`
 - `GET /me`
 - `GET /mcp-servers`
 - `GET /policies`
+- `GET /tool-registry`
+- `POST /tool-registry/{tool_id}/verify`
+- `POST /tool-registry/{tool_id}/restore`
 - `GET /requests`
 - `GET /requests/{request_id}`
 - `POST /requests`
 - `GET /approvals`
 - `POST /approvals/{approval_id}/decision`
+- `POST /requests/{request_id}/execute`
+- `GET /requests/{request_id}/evidence`
 - `GET /incidents`
+- `POST /attack-lab/run`
 
-## Quickstart
+See [API examples](docs/API_EXAMPLES.md) for protocol and approval flows.
 
-```bash
+## Run Locally
+
+```powershell
+git clone https://github.com/danieloza/mcp-security-gateway.git
+cd mcp-security-gateway
+
 python -m venv .venv
-.venv\Scripts\activate
-pip install -e .
-pip install pytest httpx
-uvicorn mcp_security_gateway.main:app --reload
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+python -m uvicorn mcp_security_gateway.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Open:
 
-- `http://127.0.0.1:8000/docs`
-- `http://127.0.0.1:8000/dashboard`
+- operator console: `http://127.0.0.1:8000/dashboard`
+- local API documentation: `http://127.0.0.1:8000/docs`
 
-## Demo API Keys
+Interactive API documentation is disabled automatically when
+`MSG_ENVIRONMENT=production`.
 
-- gateway operator: `msg-ops-demo`
-- security admin: `msg-security-demo`
-- platform admin: `msg-platform-demo`
+## Demo Credentials
 
-## Docker Compose Demo
+These credentials are public, local-only portfolio fixtures:
 
-```bash
+```text
+operator:       msg-ops-demo
+security admin: msg-security-demo
+platform admin: msg-platform-demo
+```
+
+Use the preferred header:
+
+```http
+Authorization: Bearer msg-ops-demo
+```
+
+`X-API-Key` remains available for backward-compatible local examples, but new
+integrations should use the Bearer transport. Real deployments must replace
+these fixtures with workload identity or an organizational authorization
+service.
+
+## Guided Demo
+
+1. Open the operator console.
+2. Connect as `msg-ops-demo`.
+3. Run **Guided defense**:
+   - `kb.search` is verified and executed;
+   - `repo.write_file` is held for approval;
+   - `ops.restart_service` is hard-blocked;
+   - a Bearer-like value inside arguments is redacted and contained.
+4. Switch to `msg-security-demo`.
+5. Approve the exact sandbox-write payload and run the Attack Lab.
+6. Switch back to `msg-ops-demo`.
+7. Execute the one-time lease and open its evidence timeline.
+8. In Tool Trust, simulate a changed tool description and show the manifest
+   drift result.
+
+The full presenter script is in [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md).
+
+## Docker Compose
+
+```powershell
+docker compose config --quiet
 docker compose up --build
 ```
 
-This starts:
-
-- API on `http://127.0.0.1:8000`
-- Redis on `localhost:6379`
-
-## Example Request
-
-```powershell
-curl -X POST http://127.0.0.1:8000/requests `
-  -H "X-API-Key: msg-ops-demo" `
-  -H "Content-Type: application/json" `
-  -d "{\"mcp_server_id\":\"mcp_github\",\"tool_name\":\"repo.write_file\",\"requested_scope\":\"repo:write\",\"justification\":\"Apply a generated patch to an internal repository\",\"estimated_tokens\":1400,\"arguments\":{\"path\":\"secrets.txt\",\"api_key\":\"abcd1234secret\"}}"
-```
+Compose binds the API to loopback, keeps Redis on the internal network, drops
+Linux capabilities, uses a non-root application user, and mounts only the
+persistent SQLite data volume. The local fallback audit key remains a
+development convenience; configure a managed secret for any non-local runtime.
 
 ## Testing
 
-```bash
-python -m pip install -e .
+```powershell
+python -m pip install -e ".[dev]"
 python -m pytest -q
+python -m pip_audit .
+docker compose config --quiet
 ```
+
+The suite covers key migration, credential response shaping, MCP negotiation,
+verified low-risk execution, maker-checker separation, argument-bound leases,
+lease replay, manifest quarantine, DLP blocking, tenant isolation, Origin
+validation, strict request schemas, evidence integrity, and dashboard headers.
+
+## Production-shaped, Not Production-ready
+
+This repository proves the security control path. It intentionally does not
+claim to be a drop-in enterprise gateway.
+
+Current portfolio boundaries:
+
+- SQLite persistence rather than managed PostgreSQL and migrations;
+- public local demo credentials rather than corporate workload identity;
+- a fixed in-process execution adapter rather than arbitrary remote MCP server
+  registration;
+- no unrestricted outbound HTTP, filesystem, shell, or production operations;
+- local HMAC evidence integrity without external timestamping or immutable
+  archival;
+- single-node operator workflow without organizational incident ownership.
+
+A company rollout would add OAuth 2.1 resource-server validation, managed secrets
+and key rotation, PostgreSQL, durable queues, network egress policy, a controlled
+server onboarding process, signed manifest releases, centralized telemetry,
+backups, incident response, and independent audit retention.
+
+See [Threat Model](docs/THREAT_MODEL.md) and
+[Architecture](docs/ARCHITECTURE.md).
 
 ## Proof Assets
 
-What you can inspect immediately:
-
-- dashboard proof: [`docs/assets/gateway-dashboard.png`](docs/assets/gateway-dashboard.png)
-- architecture notes: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- case study: [`docs/CASE_STUDY.md`](docs/CASE_STUDY.md)
-- short Polish interview version: [`docs/README_SHORT_PL.md`](docs/README_SHORT_PL.md)
-
-## Verified Paths
-
-- low-risk read request -> approved
-- high-risk write request -> routed to approval
-- privileged production action -> blocked and escalated to incident
-- sensitive arguments are redacted before request records are persisted
+- animated product demo: [docs/assets/mcp-security-gateway-demo.gif](docs/assets/mcp-security-gateway-demo.gif)
+- operator dashboard: [docs/assets/gateway-dashboard.png](docs/assets/gateway-dashboard.png)
+- policy enforcement: [docs/assets/policy-enforcement.png](docs/assets/policy-enforcement.png)
+- maker-checker approval: [docs/assets/approval-workbench.png](docs/assets/approval-workbench.png)
+- Attack Lab: [docs/assets/attack-lab.png](docs/assets/attack-lab.png)
+- evidence chain: [docs/assets/evidence-chain.png](docs/assets/evidence-chain.png)
+- architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- threat model: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
+- API examples: [docs/API_EXAMPLES.md](docs/API_EXAMPLES.md)
+- guided demo: [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md)
+- case study: [docs/CASE_STUDY.md](docs/CASE_STUDY.md)
+- patch notes: [CHANGELOG.md](CHANGELOG.md)
 
 ## Interview Framing
 
-MCP Security Gateway is a backend gateway for controlling MCP tool access. It models policy enforcement, approvals, incidents, rate limiting, and redacted audit logs. The goal was to show the control and security layer around agent tool access, not just model invocation.
+> I built a protocol-aware MCP enforcement point rather than trusting the agent
+> or the tool server. Every call is tied to workload identity, a pinned tool
+> manifest, versioned policy, and an exact argument digest. Risky calls receive a
+> one-time approval lease, while manifest drift, secret egress, scope escalation,
+> and production operations are contained before execution.
 
-## Architecture
+## Related Project
 
-- gateway API: [main.py](src/mcp_security_gateway/main.py)
-- policy engine: [services.py](src/mcp_security_gateway/services.py)
-- persistence layer: [repository.py](src/mcp_security_gateway/repository.py)
-- architecture notes: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- case study: [CASE_STUDY.md](docs/CASE_STUDY.md)
+[Regulated AI Agent Platform](https://github.com/danieloza/regulated-ai-agent-platform)
+demonstrates broader governance lifecycles. MCP Security Gateway stays deliberately
+narrow: it is the protocol-specific enforcement boundary for agent tool traffic.
+
+## License
+
+Copyright © 2026 Daniel Danek. Released under the
+[MIT License](LICENSE).
