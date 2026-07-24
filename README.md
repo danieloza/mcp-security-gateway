@@ -3,13 +3,15 @@
 > Protocol-aware runtime firewall for verified MCP tool execution.
 
 [![CI](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml)
+![Release](https://img.shields.io/badge/Release-v0.2.1-22C55E?style=for-the-badge)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
 ![Security Tests](https://img.shields.io/badge/Security_Tests-20_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
+[![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
-[Overview](#what-it-solves) · [Verified Execution](#verified-execution-flow) · [Demo](#guided-demo) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md)
+[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
 ![MCP Security Gateway operator console](docs/assets/gateway-dashboard.png)
 
@@ -31,6 +33,26 @@ MCP Security Gateway places that control point between an MCP client and a fixed
 tool execution adapter. It supports protocol-level `initialize`, `ping`,
 `tools/list`, and `tools/call`, then applies deterministic controls before any
 side effect.
+
+## Product Demo
+
+This walkthrough is generated from the running gateway, not from mocked
+screens. It follows one governed request across policy evaluation,
+maker-checker approval, adversarial security tests, execution, and evidence.
+
+![MCP Security Gateway verified execution demo](docs/assets/mcp-security-gateway-demo.gif)
+
+| Stage | Control | Observable proof |
+| --- | --- | --- |
+| Request | Scope, environment, DLP, and rate policy | `executed`, `awaiting approval`, or `blocked` before side effects |
+| Approval | Maker-checker separation | Exact payload digest and assigned checker |
+| Attack testing | Deterministic MCP abuse cases | Rug pull, tampering, secret egress, SSRF, and key-storage checks |
+| Execution | One-time capability lease | Caller, manifest, arguments, policy, and expiry re-verified |
+| Evidence | HMAC-linked audit events | Policy, approval, and execution chain with integrity status |
+
+The operator-led version takes about 90 seconds. See the
+[presenter script](docs/DEMO_GUIDE.md) for the exact credential switches and
+talk track.
 
 ## Verified Execution Flow
 
@@ -120,6 +142,41 @@ The dashboard provides:
 
 The UI keeps the entered credential only in JavaScript memory. It does not use
 cookies or browser storage.
+
+## Product Tour
+
+The screenshots below use a clean local database and the same API paths covered
+by the automated tests.
+
+### 1. Policy enforcement before execution
+
+![Policy decisions and pinned MCP tool manifests](docs/assets/policy-enforcement.png)
+
+One table separates policy decision from execution state. Safe knowledge access
+executes, a regulated write pauses, and forbidden production or secret-bearing
+calls are contained.
+
+### 2. Maker-checker approval bound to the payload
+
+![Maker-checker exact payload approval](docs/assets/approval-workbench.png)
+
+The reviewer sees the request identity, payload digest, maker, and checker.
+Approval creates a short-lived capability lease for that immutable payload only.
+
+### 3. Adversarial controls as executable evidence
+
+![MCP Attack Lab showing five verified controls](docs/assets/attack-lab.png)
+
+The Attack Lab verifies manifest rug-pull detection, post-approval argument
+tampering, secret exfiltration, cloud-metadata SSRF, and digest-only API-key
+storage.
+
+### 4. Tamper-evident evidence chain
+
+![Verified policy approval and execution evidence chain](docs/assets/evidence-chain.png)
+
+The evidence explorer links policy, approval, and execution events and verifies
+the organization audit chain before presenting the evidence-pack digest.
 
 ## API Surface
 
@@ -259,7 +316,12 @@ See [Threat Model](docs/THREAT_MODEL.md) and
 
 ## Proof Assets
 
+- animated product demo: [docs/assets/mcp-security-gateway-demo.gif](docs/assets/mcp-security-gateway-demo.gif)
 - operator dashboard: [docs/assets/gateway-dashboard.png](docs/assets/gateway-dashboard.png)
+- policy enforcement: [docs/assets/policy-enforcement.png](docs/assets/policy-enforcement.png)
+- maker-checker approval: [docs/assets/approval-workbench.png](docs/assets/approval-workbench.png)
+- Attack Lab: [docs/assets/attack-lab.png](docs/assets/attack-lab.png)
+- evidence chain: [docs/assets/evidence-chain.png](docs/assets/evidence-chain.png)
 - architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - threat model: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
 - API examples: [docs/API_EXAMPLES.md](docs/API_EXAMPLES.md)
@@ -280,3 +342,8 @@ See [Threat Model](docs/THREAT_MODEL.md) and
 [Regulated AI Agent Platform](https://github.com/danieloza/regulated-ai-agent-platform)
 demonstrates broader governance lifecycles. MCP Security Gateway stays deliberately
 narrow: it is the protocol-specific enforcement boundary for agent tool traffic.
+
+## License
+
+Copyright © 2026 Daniel Danek. Released under the
+[MIT License](LICENSE).

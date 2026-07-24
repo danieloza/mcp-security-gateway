@@ -2,6 +2,19 @@
 
 Significant changes to the MCP Security Gateway are documented here.
 
+## [0.2.1] - 2026-07-24
+
+### Commercial project showcase
+
+- added a compact animated product walkthrough generated from the running
+  gateway;
+- added full-resolution views for policy enforcement, maker-checker approval,
+  the MCP Attack Lab, and the tamper-evident evidence chain;
+- restructured the README as an executive product tour while keeping technical
+  boundaries and deployment limitations explicit;
+- added release and MIT license badges plus package ownership metadata;
+- released the repository under the MIT License.
+
 ## [0.2.0] - 2026-07-24
 
 ### Verified MCP execution

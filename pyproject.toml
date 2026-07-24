@@ -4,10 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-security-gateway"
-version = "0.2.0"
+version = "0.2.1"
 description = "Protocol-aware MCP runtime firewall with verified execution, approvals, and tamper-evident evidence."
 readme = "README.md"
 requires-python = ">=3.11"
+authors = [
+  { name = "Daniel Danek" },
+]
+license = { file = "LICENSE" }
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: FastAPI",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Security",
+]
 dependencies = [
   "fastapi>=0.116.0,<1.0.0",
   "pydantic>=2.11.0,<3.0.0",
