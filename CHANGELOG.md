@@ -2,6 +2,22 @@
 
 Significant changes to the MCP Security Gateway are documented here.
 
+## [Unreleased]
+
+### Operator console
+
+- replace the sidebar with a module launcher: one tile per module, following
+  the dotted-card pattern with a corner icon on hover, each showing a live
+  status (requests and blocks, verified manifests, pending approvals, last
+  Attack Lab score, last evidence chain);
+- open each module on its own screen with an **All modules** back button;
+  `Esc`, browser Back and Forward, and direct links such as `#traffic` work;
+- move the credential field to the top bar so roles can be switched from any
+  module, and move focus to the module heading when a module opens;
+- add a brand favicon as a `data:` URI, removing the `favicon.ico` 404 from
+  the browser console;
+- add a test that every tile opens exactly one existing module (62 tests).
+
 ## [0.3.0] - 2026-10-20
 
 ### Breaking change

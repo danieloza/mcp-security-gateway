@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-61_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-62_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
@@ -138,7 +138,14 @@ the lab fails when argument DLP or execution binding is disabled.
 
 ## Operator Console
 
-The dashboard provides:
+The dashboard opens on a module launcher: one tile per module, each with a live
+status such as pending approvals or the last Attack Lab score. A tile opens that
+module on its own screen; **All modules**, `Esc`, or the browser Back button
+returns to the launcher, and each module has a direct link such as
+`/dashboard#traffic`. The credential field stays in the top bar so roles can be
+switched from any module.
+
+The modules provide:
 
 - live MCP policy and execution traffic, with the decision reason on every row
   and an expandable trace of each policy control;
@@ -356,18 +363,19 @@ servers through OAuth discovery cannot use it yet.
 ## Guided Demo
 
 1. Open the operator console.
-2. Connect as `msg-ops-demo`.
-3. Run **Guided defense**:
+2. Connect as `msg-ops-demo` in the top bar.
+3. Open the **Overview** tile and run **Guided defense**:
    - `kb.search` is verified and executed;
    - `repo.write_file` is held for approval;
    - `ops.restart_service` is hard-blocked;
    - a Bearer-like value inside arguments is redacted and contained.
 4. Switch to `msg-security-demo`.
-5. Approve the exact sandbox-write payload and run the Attack Lab.
+5. In **Approvals**, approve the exact sandbox-write payload; then run the
+   **Attack lab**.
 6. Switch back to `msg-ops-demo`.
-7. Select **Claim & execute**: only the maker can claim the one-time lease, and
-   the console spends it immediately; then open the evidence timeline.
-8. In Tool Trust, simulate a changed tool description and show the manifest
+7. In **Live traffic**, select **Claim & execute**: only the maker can claim the
+   one-time lease, and the console spends it immediately and opens **Evidence**.
+8. In **Tool trust**, simulate a changed tool description and show the manifest
    drift result.
 
 The full presenter script is in [docs/DEMO_GUIDE.md](docs/DEMO_GUIDE.md).

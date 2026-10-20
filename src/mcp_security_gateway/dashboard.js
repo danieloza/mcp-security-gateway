@@ -10,9 +10,39 @@ const state = {
   incidents: [],
   demoArguments: new Map(),
   expanded: new Set(),
+  labResult: null,
+  evidence: null,
 };
 
 const byId = (id) => document.getElementById(id);
+
+// The tiles are the single source of truth for which modules exist and how they are named.
+const MODULES = new Map(
+  [...document.querySelectorAll(".module-tile")].map((tile) => [tile.dataset.module, tile.querySelector("strong").textContent]),
+);
+
+function activeModule() {
+  const id = decodeURIComponent(window.location.hash.slice(1));
+  return MODULES.has(id) ? id : null;
+}
+
+function openModule(id) {
+  if (activeModule() !== id) window.location.hash = id;
+}
+
+function renderView() {
+  const active = activeModule();
+  byId("home").hidden = Boolean(active);
+  byId("module-bar").hidden = !active;
+  MODULES.forEach((_, id) => {
+    byId(id).hidden = id !== active;
+  });
+  if (active) byId("module-crumb-name").textContent = MODULES.get(active);
+  document.title = active ? `${MODULES.get(active)} · MCP Security Gateway` : "MCP Security Gateway";
+  window.scrollTo({ top: 0, behavior: "instant" });
+  const heading = active ? byId(active).querySelector("h2") : byId("home-title");
+  heading.focus({ preventScroll: true });
+}
 
 function textElement(tag, value, className) {
   const node = document.createElement(tag);
@@ -158,6 +188,27 @@ function renderMetrics() {
   byId("metric-approvals").textContent = String(approvals ?? "—");
   byId("metric-incidents").textContent = String(incidents ?? "—");
   byId("metric-requests-note").textContent = state.user ? `Tenant ${state.user.organization_id}` : "Awaiting connection";
+  renderTiles();
+}
+
+function renderTiles() {
+  const { health, user } = state;
+  const blocked = state.requests.filter((item) => item.status === "blocked").length;
+  const verified = state.tools.filter((tool) => tool.trust_status === "verified").length;
+  const pending = user ? state.approvals.filter((item) => item.status === "pending").length : health?.pending_approvals;
+  const stats = {
+    overview: health ? `${health.requests} governed · ${health.incidents} incidents` : "Checking gateway…",
+    traffic: user ? `${state.requests.length} requests · ${blocked} blocked` : "Connect to inspect traffic",
+    registry: user ? `${verified}/${state.tools.length} manifests verified` : health ? `${health.tools} pinned manifests` : "—",
+    approvals: pending === undefined ? "—" : `${pending} pending review`,
+    "attack-lab": state.labResult ? `${state.labResult.passed}/${state.labResult.total} controls passed` : "Not run yet",
+    evidence: state.evidence
+      ? `Chain ${state.evidence.valid ? "verified" : "failed"} · ${short(state.evidence.requestId, 14)}`
+      : "Pick a request in Live traffic",
+  };
+  MODULES.forEach((_, id) => {
+    byId(`tile-stat-${id}`).textContent = stats[id] ?? "—";
+  });
 }
 
 function renderRequests() {
@@ -482,6 +533,7 @@ async function runAttackLab() {
       );
       grid.append(card);
     });
+    state.labResult = result;
     toast(`Attack lab: ${result.passed}/${result.total} controls passed.`);
     await loadHealth();
   } catch (error) {
@@ -522,7 +574,9 @@ async function loadEvidence(requestId) {
       timeline.append(textElement("p", "No audit events were found for this request."));
     }
     panel.append(header, timeline);
-    document.querySelector("#evidence").scrollIntoView({ behavior: "smooth", block: "start" });
+    state.evidence = { requestId: evidence.request.id, valid: evidence.chain_valid };
+    renderTiles();
+    openModule("evidence");
   } catch (error) {
     toast(error.message, true);
   }
@@ -552,11 +606,19 @@ byId("refresh-button").addEventListener("click", async () => {
 byId("guided-demo-button").addEventListener("click", runGuidedDefense);
 byId("attack-lab-button").addEventListener("click", runAttackLab);
 
-document.querySelectorAll(".nav-link").forEach((link) => {
-  link.addEventListener("click", () => {
-    document.querySelectorAll(".nav-link").forEach((item) => item.classList.remove("active"));
-    link.classList.add("active");
-  });
+window.addEventListener("hashchange", renderView);
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && activeModule() && !event.target.closest("input, textarea")) {
+    window.location.hash = "";
+  }
 });
 
+// The skip link targets #main, which is not a module; focus it without leaving the current view.
+byId("skip-link").addEventListener("click", (event) => {
+  event.preventDefault();
+  byId("main").focus();
+});
+
+renderView();
 loadHealth();
