@@ -37,16 +37,23 @@ authoritative for the portfolio runtime.
 
 `POST /mcp` supports:
 
-- `initialize`;
+- `initialize`, negotiating MCP `2025-11-25` or `2025-06-18`;
 - `ping`;
 - `tools/list`;
-- `tools/call`.
+- `tools/call`;
+- `notifications/*`, acknowledged with `202 Accepted` and no body.
+
+The gateway advertises `tools.listChanged: false` and answers `GET /mcp` with
+`405`, because it keeps no server-to-client stream. `2025-03-26` is not offered,
+since that revision requires JSON-RPC batch support.
 
 The transport validates:
 
 - `Authorization: Bearer` credentials;
 - an allowlisted browser `Origin`, when present;
 - consistency between `Mcp-Method` / `Mcp-Name` headers and the JSON-RPC body;
+- a supported `MCP-Protocol-Version` header, when present;
+- a string or integer request `id` (only notifications may omit it);
 - strict Pydantic envelopes and a bounded Content-Length;
 - tenant membership before exposing server or tool inventory.
 
@@ -62,13 +69,19 @@ supported.
 4. Validate arguments against the stored JSON schema.
 5. Apply fixed-window caller rate limits.
 6. Detect secret-bearing values and forbidden network destinations.
-7. Verify requested scope, server environment, and manifest trust state.
-8. Select a versioned policy:
+7. Ask the execution adapter to preflight the arguments, so a call it would
+   refuse (for example a sandbox path traversal) is blocked before approval.
+8. Verify requested scope, server environment, and manifest trust state.
+9. Select a versioned policy:
    - `pol_default_allow`;
    - `pol_approval_gate`;
    - `pol_hard_block`.
-9. Persist the redacted arguments, digests, policy trace, and decision.
-10. Execute, hold for approval, or create an incident.
+10. Persist the redacted arguments, digests, policy trace, and decision.
+11. Execute, hold for approval, or create an incident.
+
+If the adapter still fails after a lease is consumed, the gateway records a
+`failed` execution and a `tool_execution_failed` audit event, and the request
+cannot be retried with the spent lease.
 
 ## Approval and Execution Binding
 
@@ -80,10 +93,15 @@ A high-risk decision stores:
 - governed-request digest;
 - maker identity.
 
-The checker cannot be the maker. Approval generates a random token, while only
-its digest is persisted. The capability lease is:
+The checker cannot be the maker. Approval marks the request `lease_ready` but
+returns no credential. The maker then claims a random token through
+`POST /requests/{request_id}/lease`; only its digest is persisted. The
+capability lease is:
 
-- valid for a short configured TTL;
+- claimable once, and only by the requesting workload;
+- executable only by the requesting workload, with no platform-administrator
+  override;
+- valid for a short configured TTL that starts at the claim;
 - usable once;
 - tenant and request bound;
 - consumed atomically;

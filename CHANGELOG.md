@@ -2,6 +2,72 @@
 
 Significant changes to the MCP Security Gateway are documented here.
 
+## [Unreleased]
+
+### Security fixes
+
+- reject unsafe `repo.write_file` paths (traversal, absolute, drive, NTFS
+  stream, non-allowlisted type) during policy evaluation, before approval and
+  lease issuance; the adapter repeats the same check before execution;
+- record adapter failures as `failed` executions with an HMAC-chained
+  `tool_execution_failed` event instead of leaving the request in
+  `lease_issued` with no evidence;
+- flag decimal, hex, octal, and shortened IPv4 literals (for example
+  `http://2130706433/`) and other non-global addresses such as
+  `100.100.100.200` as forbidden destinations; malformed numeric hosts fail
+  closed;
+- read the package, API, and MCP `serverInfo` version from a single
+  `__version__` source.
+
+### MCP protocol compliance
+
+- negotiate the protocol version: echo `2025-11-25` or `2025-06-18` when the
+  client offers it, otherwise answer with `2025-11-25`; `2025-03-26` is not
+  offered because it requires JSON-RPC batch support;
+- acknowledge notifications such as `notifications/initialized` with
+  `202 Accepted` and no body instead of a JSON-RPC error;
+- reject requests without an `id` or with a `null` id, and an unsupported
+  `MCP-Protocol-Version` header, with `400`;
+- advertise `tools.listChanged: false`, because the gateway has no
+  server-to-client stream;
+- added a "Connect Your Client" README section for Claude Code, Cursor,
+  VS Code, and the MCP Python SDK; the official SDK 2.3.0 client completed a
+  full governed session against the gateway.
+
+### Separation of duties and honest attack testing
+
+- approval no longer returns a capability lease to the checker; the request
+  becomes `lease_ready`, and only the maker can claim the lease once through
+  `POST /requests/{request_id}/lease`, recorded as a `lease_claimed` event;
+- removed the platform-administrator override that allowed executing another
+  workload's approved request;
+- the Attack Lab now replays rug pull, approval tampering, secret egress, and a
+  decimal-encoded SSRF destination through the real gateway flow on an
+  isolated, freshly seeded replica instead of comparing constants; crashing
+  probes are reported as failed controls;
+- the operator console replaces browser-held leases with a maker-only
+  **Claim & execute** action.
+
+### Operator console
+
+- show the decision reason on every live-traffic row and an expandable trace of
+  each policy control with its result and evidence;
+- show the tool, justification, and redacted payload on approval cards, so the
+  checker sees what "Approve exact payload" approves;
+- render attacker-controlled arguments and justifications as text only; a
+  browser probe with `<img onerror>`, `<script>`, and event-handler payloads
+  injected no elements;
+- keep request row actions on one line when a decision trace is expanded;
+- refreshed the product screenshots and demo GIF from a clean demo database so
+  they show decision traces, approval payloads, replayed attacks, and the lease
+  claim.
+
+### Testing
+
+- expanded the test suite from 20 to 61 tests, including tests that prove the
+  Attack Lab fails when argument DLP or execution binding is disabled and a
+  guard against HTML sinks in the dashboard script.
+
 ## [0.2.1] - 2026-07-24
 
 ### Commercial project showcase

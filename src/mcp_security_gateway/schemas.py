@@ -101,8 +101,12 @@ class ApprovalDecisionIn(StrictModel):
 
 class ApprovalDecisionOut(StrictModel):
     approval: ApprovalOut
-    capability_lease: str | None
-    expires_at: str | None
+
+
+class LeaseClaimOut(StrictModel):
+    request_id: str
+    capability_lease: str
+    expires_at: str
 
 
 class ApprovedExecutionIn(StrictModel):

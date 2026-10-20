@@ -9,7 +9,7 @@ const state = {
   approvals: [],
   incidents: [],
   demoArguments: new Map(),
-  leases: new Map(),
+  expanded: new Set(),
 };
 
 const byId = (id) => document.getElementById(id);
@@ -28,6 +28,50 @@ function badge(value) {
 function short(value, length = 12) {
   if (!value) return "—";
   return value.length > length ? `${value.slice(0, length)}…` : value;
+}
+
+function parseJson(value, fallback) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+// Tool arguments are attacker-controlled, so they are only ever rendered as text.
+function payloadBlock(redactedArguments) {
+  const block = document.createElement("div");
+  block.className = "payload-block";
+  const pretty = JSON.stringify(parseJson(redactedArguments, {}), null, 2);
+  block.append(textElement("span", "Redacted arguments"), textElement("pre", pretty, "mono"));
+  return block;
+}
+
+function controlResult(control) {
+  // Manifest entries carry the trust state and the decision entry carries the request status.
+  if (control.control === "manifest" && control.result === "verified") return "passed";
+  return control.result;
+}
+
+function decisionDetail(request) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "decision-detail";
+  wrapper.append(textElement("p", request.risk_reason, "decision-reason"));
+  const trace = document.createElement("ol");
+  trace.className = "control-trace";
+  trace.setAttribute("aria-label", "Policy controls evaluated for this request");
+  parseJson(request.policy_trace, []).forEach((control) => {
+    const evidence = Array.isArray(control.evidence) ? control.evidence.join(", ") || "none" : String(control.evidence);
+    const item = document.createElement("li");
+    item.append(
+      textElement("span", control.control.replaceAll("_", " "), "control-name"),
+      badge(controlResult(control)),
+      textElement("small", short(evidence, 40), "mono"),
+    );
+    trace.append(item);
+  });
+  wrapper.append(trace, payloadBlock(request.redacted_arguments));
+  return wrapper;
 }
 
 function toast(message, isError = false) {
@@ -144,7 +188,7 @@ function renderRequests() {
     );
 
     const decisionCell = document.createElement("td");
-    decisionCell.append(badge(request.status));
+    decisionCell.append(badge(request.status), textElement("span", request.risk_reason, "cell-subtitle cell-reason"));
 
     const executionCell = document.createElement("td");
     executionCell.append(badge(request.execution_status));
@@ -156,12 +200,24 @@ function renderRequests() {
     );
 
     const actionsCell = document.createElement("td");
+    actionsCell.className = "actions-cell";
+    const isExpanded = state.expanded.has(request.id);
+    const whyButton = textElement("button", isExpanded ? "Hide why" : "Why", "button button-secondary button-small");
+    whyButton.type = "button";
+    whyButton.setAttribute("aria-expanded", String(isExpanded));
+    whyButton.addEventListener("click", () => {
+      if (isExpanded) state.expanded.delete(request.id);
+      else state.expanded.add(request.id);
+      renderRequests();
+    });
+    actionsCell.append(whyButton, " ");
     const evidenceButton = textElement("button", "Evidence", "button button-secondary button-small");
     evidenceButton.type = "button";
     evidenceButton.addEventListener("click", () => loadEvidence(request.id));
     actionsCell.append(evidenceButton);
-    if (state.leases.has(request.id) && state.demoArguments.has(request.id)) {
-      const executeButton = textElement("button", "Execute lease", "button button-primary button-small");
+    const isMaker = state.user && state.user.id === request.requested_by;
+    if (isMaker && request.execution_status === "lease_ready" && state.demoArguments.has(request.id)) {
+      const executeButton = textElement("button", "Claim & execute", "button button-primary button-small");
       executeButton.type = "button";
       executeButton.addEventListener("click", () => executeLease(request.id));
       actionsCell.append(" ", executeButton);
@@ -169,6 +225,16 @@ function renderRequests() {
 
     row.append(requestCell, toolCell, decisionCell, executionCell, policyCell, actionsCell);
     body.append(row);
+
+    if (isExpanded) {
+      const detailRow = document.createElement("tr");
+      detailRow.className = "detail-row";
+      const detailCell = document.createElement("td");
+      detailCell.colSpan = 6;
+      detailCell.append(decisionDetail(request));
+      detailRow.append(detailCell);
+      body.append(detailRow);
+    }
   });
 }
 
@@ -224,10 +290,12 @@ function renderApprovals() {
     const header = document.createElement("header");
     header.append(textElement("h3", short(approval.id, 18), "mono"), badge(approval.status));
     card.append(header, textElement("p", approval.reason));
+    const request = state.requests.find((item) => item.id === approval.request_id);
 
     const meta = document.createElement("div");
     meta.className = "approval-meta";
     [
+      ["Tool", request ? `${request.tool_name} · ${request.requested_scope}` : "—"],
       ["Request", short(approval.request_id, 15)],
       ["Payload digest", short(approval.request_digest, 16)],
       ["Maker", approval.requested_by],
@@ -238,6 +306,14 @@ function renderApprovals() {
       meta.append(item);
     });
     card.append(meta);
+    if (request) {
+      card.append(
+        textElement("p", `Justification: ${request.justification}`, "approval-justification"),
+        payloadBlock(request.redacted_arguments),
+      );
+    } else {
+      card.append(textElement("p", "Payload unavailable: the governed request is not visible.", "approval-justification"));
+    }
 
     if (approval.status === "pending") {
       const actions = document.createElement("div");
@@ -324,9 +400,8 @@ async function decideApproval(approval, decision) {
       method: "POST",
       body: JSON.stringify({ decision }),
     });
-    if (result.capability_lease) {
-      state.leases.set(approval.request_id, result.capability_lease);
-      toast("Exact payload approved. One-time lease held only in browser memory.");
+    if (result.approval.status === "approved") {
+      toast("Exact payload approved. Only the maker can claim the one-time lease.");
     } else {
       toast("Request denied and contained.");
     }
@@ -337,18 +412,18 @@ async function decideApproval(approval, decision) {
 }
 
 async function executeLease(requestId) {
-  const lease = state.leases.get(requestId);
   const argumentsValue = state.demoArguments.get(requestId);
-  if (!lease || !argumentsValue) {
-    toast("The browser no longer holds the exact arguments and lease.", true);
+  if (!argumentsValue) {
+    toast("The browser no longer holds the exact arguments for this request.", true);
     return;
   }
   try {
+    // The maker claims the lease and spends it immediately; the token never outlives this call.
+    const claim = await api(`/requests/${encodeURIComponent(requestId)}/lease`, { method: "POST" });
     const execution = await api(`/requests/${encodeURIComponent(requestId)}/execute`, {
       method: "POST",
-      body: JSON.stringify({ arguments: argumentsValue, capability_lease: lease }),
+      body: JSON.stringify({ arguments: argumentsValue, capability_lease: claim.capability_lease }),
     });
-    state.leases.delete(requestId);
     toast(`Controlled execution ${short(execution.id, 18)} succeeded.`);
     await loadAuthenticatedData();
     await loadEvidence(requestId);

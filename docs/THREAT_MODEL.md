@@ -42,16 +42,19 @@ servers, managed databases, production networks, or downstream business APIs.
 | Tool-description or schema rug pull | Pin canonical manifest digest; detect field changes; quarantine | Registry administrators remain privileged |
 | Untrusted tool annotations | Treat annotations as hints; use local policy and risk metadata as authority | Incorrect local risk classification still requires review |
 | Approval payload substitution | Bind approval and lease to the exact request and argument digests | SHA-256 collision risk is considered negligible |
-| Approval replay | Random, short-lived lease; digest-only storage; atomic one-time consumption | Stolen unexpired lease can be used by the bound workload |
+| Approval replay | Random, short-lived lease; digest-only storage; atomic one-time claim and consumption | Stolen unexpired lease can be used by the bound workload |
 | Maker self-approval | Reject approval when checker equals request maker | Organizational group governance is not modeled |
+| Privileged lease hijack | Approval returns no credential; only the maker can claim and execute a lease; platform administrators have no execution override | Database administrators remain privileged |
+| Theatrical security tests | Attack Lab replays each attack through the real gateway flow on an isolated replica; tests prove it fails when DLP or execution binding is disabled | The replica shares code, not live data, so tenant-specific drift is out of scope |
 | Secret exfiltration in arguments | Recursive secret-key/value detection, redaction, and hard block | Pattern detection cannot replace enterprise DLP |
-| SSRF to internal or metadata endpoints | No arbitrary outbound connector; flag loopback/private/link-local literal destinations | Future connector DNS resolution requires rebinding-safe egress enforcement |
+| SSRF to internal or metadata endpoints | No arbitrary outbound connector; flag non-global literal destinations, including decimal, hex, octal, and shortened IPv4 forms; fail closed on malformed numeric hosts | Future connector DNS resolution requires rebinding-safe egress enforcement |
 | MCP DNS rebinding | Validate browser Origin against an allowlist | Non-browser clients authenticate with Bearer credentials |
 | Header/body policy split | Reject mismatched `Mcp-Method` and `Mcp-Name` values | Upstream infrastructure must preserve the validated headers |
 | Request flooding | Bounded request size and Redis-backed caller rate limit | Edge-level connection and bandwidth controls remain necessary |
 | Redis loss | Refuse in-memory fallback in production mode | Local mode intentionally falls back for portability |
 | Audit record modification | HMAC-chained events and evidence verification | Local key and database share a runtime; external anchoring is not included |
-| Host filesystem modification | Fixed adapter only stages sandbox metadata; no shell execution | A future real connector needs separate process isolation |
+| Host filesystem modification | Fixed adapter only stages sandbox metadata; no shell execution; traversal, drive, stream, and non-allowlisted paths are rejected by policy before approval and again by the adapter | A future real connector needs separate process isolation |
+| Silent execution failure | Adapter failures are persisted as failed executions and HMAC-chained `tool_execution_failed` events | Failure reasons are redacted by pattern, not by a full DLP engine |
 
 ## Security Invariants
 
@@ -59,6 +62,8 @@ servers, managed databases, production networks, or downstream business APIs.
 - no MCP call executes before identity, manifest, schema, scope, DLP, rate, and
   environment checks;
 - a high-risk call cannot execute without a fresh exact-payload lease;
+- only the requesting workload can claim or execute a lease, and approvers
+  never hold it;
 - approval and execution are tenant-bound;
 - manifest drift blocks execution once quarantined;
 - production administration never reaches the local adapter;

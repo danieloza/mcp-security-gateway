@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+from importlib.metadata import version
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+from mcp_security_gateway import __version__
 from mcp_security_gateway.main import create_app
 from mcp_security_gateway.repository import SQLiteRepository
-from mcp_security_gateway.security import hash_secret
+from mcp_security_gateway.security import hash_secret, is_forbidden_destination
+from mcp_security_gateway.services import ControlledToolExecutor, GatewayService
 from mcp_security_gateway.state import InMemoryRateLimitStore
 
 
@@ -42,6 +47,14 @@ def create_pending_request(client: TestClient) -> tuple[str, str, dict[str, str]
     assert response.status_code == 201
     approval = client.get("/approvals", headers=OPERATOR).json()[0]
     return response.json()["id"], approval["id"], arguments
+
+
+def approve_and_claim(client: TestClient, request_id: str, approval_id: str) -> str:
+    decision = client.post(f"/approvals/{approval_id}/decision", headers=SECURITY, json={"decision": "approved"})
+    assert decision.status_code == 200
+    claim = client.post(f"/requests/{request_id}/lease", headers=OPERATOR)
+    assert claim.status_code == 200
+    return claim.json()["capability_lease"]
 
 
 def test_health_reports_digest_only_api_key_storage(tmp_path: Path) -> None:
@@ -194,14 +207,7 @@ def test_operator_cannot_self_approve(tmp_path: Path) -> None:
 def test_approval_issues_one_time_argument_bound_lease(tmp_path: Path) -> None:
     client, _, _ = make_client(tmp_path)
     request_id, approval_id, arguments = create_pending_request(client)
-    decision = client.post(
-        f"/approvals/{approval_id}/decision",
-        headers=SECURITY,
-        json={"decision": "approved"},
-    )
-    assert decision.status_code == 200
-    lease = decision.json()["capability_lease"]
-    assert lease
+    lease = approve_and_claim(client, request_id, approval_id)
 
     tampered = client.post(
         f"/requests/{request_id}/execute",
@@ -323,6 +329,76 @@ def test_attack_lab_passes_all_controls(tmp_path: Path) -> None:
     assert response.json()["passed"] == response.json()["total"] == 5
 
 
+def test_attack_lab_replays_attacks_without_touching_the_live_tenant(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    before = client.get("/health").json()
+    cases = {item["id"]: item for item in client.post("/attack-lab/run", headers=SECURITY).json()["cases"]}
+    after = client.get("/health").json()
+    assert "Arguments changed after approval" in cases["approval-tamper"]["evidence"]
+    assert "trust state" in cases["manifest-drift"]["evidence"]
+    assert "decimal-encoded" in cases["ssrf-metadata"]["evidence"]
+    for counter in ("requests", "pending_approvals", "incidents", "executions", "tools"):
+        assert after[counter] == before[counter]
+
+
+def test_attack_lab_fails_when_argument_dlp_is_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _, _ = make_client(tmp_path)
+    monkeypatch.setattr("mcp_security_gateway.services.security_findings", lambda arguments: [])
+    cases = {item["id"]: item for item in client.post("/attack-lab/run", headers=SECURITY).json()["cases"]}
+    assert cases["secret-exfiltration"]["passed"] is False
+    assert cases["ssrf-metadata"]["passed"] is False
+    assert cases["manifest-drift"]["passed"] is True
+
+
+def test_attack_lab_fails_when_execution_binding_is_bypassed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _, _ = make_client(tmp_path)
+    monkeypatch.setattr(GatewayService, "_validate_execution_binding", lambda self, auth, request, arguments: None)
+    cases = {item["id"]: item for item in client.post("/attack-lab/run", headers=SECURITY).json()["cases"]}
+    assert cases["approval-tamper"]["observed"] == "executed"
+    assert cases["approval-tamper"]["passed"] is False
+
+
+def test_approval_decision_returns_no_capability_to_the_checker(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, _ = create_pending_request(client)
+    decision = client.post(f"/approvals/{approval_id}/decision", headers=SECURITY, json={"decision": "approved"})
+    assert set(decision.json()) == {"approval"}
+    assert client.get(f"/requests/{request_id}", headers=OPERATOR).json()["execution_status"] == "lease_ready"
+    assert client.post(f"/requests/{request_id}/lease", headers=SECURITY).status_code == 403
+    assert client.post(f"/requests/{request_id}/lease", headers=PLATFORM).status_code == 403
+
+
+def test_lease_is_claimable_only_after_approval_and_only_once(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, _ = create_pending_request(client)
+    early = client.post(f"/requests/{request_id}/lease", headers=OPERATOR)
+    assert early.status_code == 403
+    approve_and_claim(client, request_id, approval_id)
+    second = client.post(f"/requests/{request_id}/lease", headers=OPERATOR)
+    assert second.status_code == 403
+    events = client.get(f"/requests/{request_id}/evidence", headers=OPERATOR).json()["audit_events"]
+    assert [event["event_type"] for event in events][-1] == "lease_claimed"
+
+
+def test_platform_admin_cannot_execute_another_workloads_request(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, arguments = create_pending_request(client)
+    lease = approve_and_claim(client, request_id, approval_id)
+    hijack = client.post(
+        f"/requests/{request_id}/execute",
+        headers=PLATFORM,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert hijack.status_code == 403
+    assert "requesting workload" in hijack.json()["detail"]
+    owner = client.post(
+        f"/requests/{request_id}/execute",
+        headers=OPERATOR,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert owner.status_code == 200
+
+
 def test_rate_limit_store_does_not_retain_raw_api_key(tmp_path: Path) -> None:
     client, _, rates = make_client(tmp_path)
     client.post("/requests", headers=OPERATOR, json=request_payload())
@@ -365,6 +441,111 @@ def test_mcp_origin_and_header_mismatch_are_rejected(tmp_path: Path) -> None:
     assert mismatch.status_code == 400
 
 
+@pytest.mark.parametrize(
+    ("requested", "negotiated"),
+    [
+        ("2025-11-25", "2025-11-25"),
+        ("2025-06-18", "2025-06-18"),
+        ("2025-03-26", "2025-11-25"),
+        ("2024-11-05", "2025-11-25"),
+        (None, "2025-11-25"),
+    ],
+)
+def test_mcp_initialize_negotiates_protocol_version(
+    tmp_path: Path,
+    requested: str | None,
+    negotiated: str,
+) -> None:
+    client, _, _ = make_client(tmp_path)
+    params = {"protocolVersion": requested} if requested else {}
+    response = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params},
+    )
+    assert response.status_code == 200
+    assert response.json()["result"]["protocolVersion"] == negotiated
+
+
+def test_mcp_capabilities_do_not_promise_list_change_notifications(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    initialize = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
+    stream = client.get("/mcp", headers={**OPERATOR, "Accept": "text/event-stream"})
+    assert initialize.json()["result"]["capabilities"] == {"tools": {"listChanged": False}}
+    assert stream.status_code == 405
+
+
+@pytest.mark.parametrize("method", ["notifications/initialized", "notifications/cancelled"])
+def test_mcp_notifications_are_accepted_without_a_body(tmp_path: Path, method: str) -> None:
+    client, _, _ = make_client(tmp_path)
+    response = client.post("/mcp", headers=OPERATOR, json={"jsonrpc": "2.0", "method": method})
+    assert response.status_code == 202
+    assert response.content == b""
+
+
+def test_mcp_request_without_id_or_with_null_id_is_rejected(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    missing = client.post("/mcp", headers=OPERATOR, json={"jsonrpc": "2.0", "method": "tools/list"})
+    null = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": None, "method": "tools/list"},
+    )
+    assert missing.status_code == 400
+    assert null.status_code == 400
+
+
+def test_mcp_protocol_version_header_is_validated(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    body = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+    supported = client.post("/mcp", headers={**OPERATOR, "MCP-Protocol-Version": "2025-06-18"}, json=body)
+    unsupported = client.post("/mcp", headers={**OPERATOR, "MCP-Protocol-Version": "2024-11-05"}, json=body)
+    assert supported.status_code == 200
+    assert unsupported.status_code == 400
+
+
+def test_mcp_client_handshake_reaches_a_governed_tool_call(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    initialize = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "handshake-test", "version": "1.0"},
+            },
+        },
+    )
+    session = {**OPERATOR, "MCP-Protocol-Version": initialize.json()["result"]["protocolVersion"]}
+    initialized = client.post(
+        "/mcp",
+        headers=session,
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+    )
+    tools = client.post("/mcp", headers=session, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    call = client.post(
+        "/mcp",
+        headers=session,
+        json={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "kb.search", "arguments": {"query": "manifest quarantine"}},
+        },
+    )
+    assert initialized.status_code == 202
+    assert "kb.search" in {tool["name"] for tool in tools.json()["result"]["tools"]}
+    assert call.json()["result"]["structuredContent"]["status"] == "executed"
+
+
 def test_schema_rejects_unexpected_request_fields(tmp_path: Path) -> None:
     client, _, _ = make_client(tmp_path)
     response = client.post(
@@ -375,6 +556,127 @@ def test_schema_rejects_unexpected_request_fields(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../etc/passwd.md",
+        "docs/../../escape.md",
+        "docs\\..\\..\\escape.md",
+        "/etc/review.md",
+        "C:/Windows/review.md",
+        "docs/review.md:hidden",
+        "docs/deploy.sh",
+    ],
+)
+def test_unsafe_sandbox_write_is_blocked_before_approval(tmp_path: Path, path: str) -> None:
+    client, _, _ = make_client(tmp_path)
+    response = client.post(
+        "/requests",
+        headers=OPERATOR,
+        json=request_payload(arguments={"path": path, "content": "approved evidence"}),
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "blocked"
+    assert response.json()["policy_id"] == "pol_hard_block"
+    trace = {item["control"]: item["result"] for item in json.loads(response.json()["policy_trace"])}
+    assert trace["adapter_preflight"] == "failed"
+    assert client.get("/approvals", headers=OPERATOR).json() == []
+    assert client.get("/incidents", headers=OPERATOR).json()[0]["severity"] == "high"
+
+
+def test_unsafe_sandbox_write_over_mcp_is_denied_without_approval(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    response = client.post(
+        "/mcp",
+        headers={**OPERATOR, "Mcp-Method": "tools/call", "Mcp-Name": "repo.write_file"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "escape-1",
+            "method": "tools/call",
+            "params": {
+                "name": "repo.write_file",
+                "arguments": {"path": "../outside.md", "content": "approved evidence"},
+            },
+        },
+    )
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["status"] == "denied"
+    assert "adapter would refuse" in result["structuredContent"]["reason"]
+
+
+def test_failed_execution_is_recorded_and_audited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, arguments = create_pending_request(client)
+    lease = approve_and_claim(client, request_id, approval_id)
+
+    def refuse(self: ControlledToolExecutor, tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+        raise PermissionError("Sandbox storage is unavailable.")
+
+    monkeypatch.setattr(ControlledToolExecutor, "execute", refuse)
+    failed = client.post(
+        f"/requests/{request_id}/execute",
+        headers=OPERATOR,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert failed.status_code == 403
+
+    request = client.get(f"/requests/{request_id}", headers=OPERATOR).json()
+    assert request["status"] == "failed"
+    assert request["execution_status"] == "failed"
+    evidence = client.get(f"/requests/{request_id}/evidence", headers=OPERATOR).json()
+    assert evidence["chain_valid"] is True
+    assert evidence["executions"][0]["status"] == "failed"
+    assert "Sandbox storage is unavailable." in evidence["executions"][0]["result_json"]
+    assert [event["event_type"] for event in evidence["audit_events"]][-1] == "tool_execution_failed"
+
+    monkeypatch.undo()
+    retry = client.post(
+        f"/requests/{request_id}/execute",
+        headers=OPERATOR,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert retry.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://2130706433/",
+        "http://0x7f000001/",
+        "http://017700000001/",
+        "http://127.1/",
+        "http://0x7f.0.0.1/",
+        "http://2852039166/latest/meta-data",
+        "http://100.100.100.200/latest/meta-data",
+        "http://256.1.1.1/",
+        "http://1.2.3.4.5/",
+    ],
+)
+def test_forbidden_destination_rejects_encoded_internal_ipv4(url: str) -> None:
+    assert is_forbidden_destination(url) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.com/hook", "http://8.8.8.8/", "http://134744072/", "https://api.v2/"],
+)
+def test_forbidden_destination_allows_public_hosts(url: str) -> None:
+    assert is_forbidden_destination(url) is False
+
+
+def test_version_has_a_single_source(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    initialize = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
+    assert version("mcp-security-gateway") == __version__
+    assert client.app.version == __version__
+    assert initialize.json()["result"]["serverInfo"]["version"] == __version__
+
+
 def test_dashboard_has_security_headers_and_external_assets(tmp_path: Path) -> None:
     client, _, _ = make_client(tmp_path)
     response = client.get("/dashboard")
@@ -383,3 +685,11 @@ def test_dashboard_has_security_headers_and_external_assets(tmp_path: Path) -> N
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert 'src="/assets/dashboard.js"' in response.text
     assert "<script>" not in response.text
+
+
+def test_dashboard_renders_untrusted_data_without_html_sinks(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    script = client.get("/assets/dashboard.js").text
+    assert "payloadBlock" in script
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
+        assert sink not in script

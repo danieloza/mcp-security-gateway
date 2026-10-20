@@ -42,8 +42,25 @@ curl -s -X POST "$GATEWAY/mcp" \
   -H "Authorization: Bearer $OPERATOR_KEY" \
   -H "Mcp-Method: initialize" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
 ```
+
+The response echoes `2025-06-18`. A client that offers an unsupported revision
+receives `2025-11-25`, the latest one the gateway supports.
+
+## Acknowledge Initialization
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "$GATEWAY/mcp" \
+  -H "Authorization: Bearer $OPERATOR_KEY" \
+  -H "MCP-Protocol-Version: 2025-06-18" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+```
+
+Notifications return `202` with no body. Send the negotiated
+`MCP-Protocol-Version` header on later requests; an unsupported value is
+rejected with `400`.
 
 ## List Verified Tools
 
@@ -125,7 +142,20 @@ curl -s -X POST "$GATEWAY/approvals/APR_ID/decision" \
   -d '{"decision":"approved"}'
 ```
 
-The response returns the raw capability lease once. Only its digest is stored.
+The response contains only the approval record. The checker never receives a
+capability; the request moves to `execution_status: lease_ready`.
+
+## Claim the Lease (maker only)
+
+```bash
+curl -s -X POST "$GATEWAY/requests/REQUEST_ID/lease" \
+  -H "Authorization: Bearer $OPERATOR_KEY"
+```
+
+The response returns the raw capability lease once, together with its expiry.
+Only its digest is stored. A second claim, a claim before approval, or a claim
+by any workload other than the maker — including a platform administrator — is
+rejected.
 
 ## Execute the Approved Request
 
@@ -138,12 +168,12 @@ curl -s -X POST "$GATEWAY/requests/REQUEST_ID/execute" \
       "path":"docs/review.md",
       "content":"Approved portfolio evidence."
     },
-    "capability_lease":"LEASE_RETURNED_BY_APPROVAL"
+    "capability_lease":"LEASE_RETURNED_BY_CLAIM"
   }'
 ```
 
 Changing either argument, reusing the lease, using an expired lease, or calling
-from the wrong tenant is rejected.
+from the wrong tenant or from any workload other than the maker is rejected.
 
 ## Run the MCP Attack Lab
 

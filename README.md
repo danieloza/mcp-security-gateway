@@ -7,11 +7,11 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-20_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-61_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
-[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
+[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
 ![MCP Security Gateway operator console](docs/assets/gateway-dashboard.png)
 
@@ -44,11 +44,11 @@ maker-checker approval, adversarial security tests, execution, and evidence.
 
 | Stage | Control | Observable proof |
 | --- | --- | --- |
-| Request | Scope, environment, DLP, and rate policy | `executed`, `awaiting approval`, or `blocked` before side effects |
-| Approval | Maker-checker separation | Exact payload digest and assigned checker |
-| Attack testing | Deterministic MCP abuse cases | Rug pull, tampering, secret egress, SSRF, and key-storage checks |
-| Execution | One-time capability lease | Caller, manifest, arguments, policy, and expiry re-verified |
-| Evidence | HMAC-linked audit events | Policy, approval, and execution chain with integrity status |
+| Request | Scope, environment, DLP, rate, and adapter policy | `executed`, `awaiting approval`, or `blocked` before side effects, with the reason and per-control trace |
+| Approval | Maker-checker separation | Tool, justification, redacted payload, and digest shown to the checker |
+| Attack testing | MCP abuse cases replayed through the gateway | Rug pull, tampering, secret egress, encoded SSRF, and key-storage checks |
+| Execution | One-time capability lease claimed by the maker | Caller, manifest, arguments, policy, and expiry re-verified |
+| Evidence | HMAC-linked audit events | Policy, approval, lease claim, and execution chain with integrity status |
 
 The operator-led version takes about 90 seconds. See the
 [presenter script](docs/DEMO_GUIDE.md) for the exact credential switches and
@@ -106,8 +106,9 @@ the gateway does not treat server-provided hints as authorization.
 
 ### Approval-bound capability leases
 
-High-risk calls are held before execution. An approved call receives a random,
-short-lived, one-use lease bound to:
+High-risk calls are held before execution. Approval itself hands out no
+credential: the checker authorizes, and only the requesting workload can then
+claim a random, short-lived, one-use lease bound to:
 
 - tenant and requesting workload;
 - server, tool, scope, and policy version;
@@ -116,32 +117,43 @@ short-lived, one-use lease bound to:
 - complete governed-request digest.
 
 Changing the path, payload, tool schema, caller, or policy context invalidates
-execution. Reusing the lease is rejected.
+execution. Reusing or re-claiming the lease is rejected. Neither the checker nor
+a platform administrator can claim or execute another workload's lease.
 
 ### MCP Attack Lab
 
-The operator console runs deterministic checks for:
+The operator console replays each attack through the real gateway flow —
+submission, policy, approval, lease claim, and execution — on an isolated,
+freshly seeded replica, so the live tenant's traffic and incidents stay
+untouched:
 
-- tool-description rug pull / manifest drift;
-- argument substitution after approval;
+- tool-description rug pull followed by a call to the drifted tool;
+- argument substitution after approval and lease claim;
 - secret-bearing tool arguments;
-- cloud-metadata SSRF destinations;
-- plaintext API-key persistence.
+- a decimal-encoded cloud-metadata SSRF destination;
+- plaintext API-key persistence (checked against the live schema).
+
+A probe that crashes is reported as a failed control, and the test suite proves
+the lab fails when argument DLP or execution binding is disabled.
 
 ## Operator Console
 
 The dashboard provides:
 
-- live MCP policy and execution traffic;
+- live MCP policy and execution traffic, with the decision reason on every row
+  and an expandable trace of each policy control;
 - tool trust registry with manifest fingerprints;
-- maker-checker approval workbench;
-- one-time lease visibility without browser persistence;
+- maker-checker approval workbench that shows the tool, justification, and
+  redacted payload being approved;
+- maker-only lease claim and execution without browser persistence;
 - attack-lab results;
 - request evidence timeline and chain-integrity status;
 - a four-call guided defense sequence for portfolio presentations.
 
 The UI keeps the entered credential only in JavaScript memory. It does not use
-cookies or browser storage.
+cookies or browser storage. Tool arguments and justifications are
+attacker-controlled, so the console renders them as text only; a test guards the
+shipped script against HTML sinks such as `innerHTML`.
 
 ## Product Tour
 
@@ -150,39 +162,44 @@ by the automated tests.
 
 ### 1. Policy enforcement before execution
 
-![Policy decisions and pinned MCP tool manifests](docs/assets/policy-enforcement.png)
+![Policy decisions with an expanded control trace](docs/assets/policy-enforcement.png)
 
 One table separates policy decision from execution state. Safe knowledge access
 executes, a regulated write pauses, and forbidden production or secret-bearing
-calls are contained.
+calls are contained. Every row states its reason; the expanded trace shows
+argument DLP failing on a secret while the stored arguments stay redacted.
 
 ### 2. Maker-checker approval bound to the payload
 
 ![Maker-checker exact payload approval](docs/assets/approval-workbench.png)
 
-The reviewer sees the request identity, payload digest, maker, and checker.
-Approval creates a short-lived capability lease for that immutable payload only.
+The reviewer sees the tool, justification, redacted payload, payload digest,
+maker, and checker. Approval lets only the maker claim a short-lived capability
+lease for that immutable payload.
 
 ### 3. Adversarial controls as executable evidence
 
 ![MCP Attack Lab showing five verified controls](docs/assets/attack-lab.png)
 
-The Attack Lab verifies manifest rug-pull detection, post-approval argument
-tampering, secret exfiltration, cloud-metadata SSRF, and digest-only API-key
-storage.
+The Attack Lab replays manifest rug pulls, post-approval argument tampering,
+secret exfiltration, and a decimal-encoded cloud-metadata SSRF destination
+through the real gateway flow on an isolated replica, and checks digest-only
+API-key storage. Each card shows the gateway's own rejection.
 
 ### 4. Tamper-evident evidence chain
 
-![Verified policy approval and execution evidence chain](docs/assets/evidence-chain.png)
+![Verified policy, approval, lease, and execution evidence chain](docs/assets/evidence-chain.png)
 
-The evidence explorer links policy, approval, and execution events and verifies
-the organization audit chain before presenting the evidence-pack digest.
+The evidence explorer links the policy decision, the checker's approval, the
+maker's lease claim, and the execution, and verifies the organization audit
+chain before presenting the evidence-pack digest.
 
 ## API Surface
 
 ### MCP protocol boundary
 
-- `POST /mcp` — `initialize`, `ping`, `tools/list`, and `tools/call`
+- `POST /mcp` — `initialize`, `ping`, `tools/list`, `tools/call`, and
+  `notifications/*` (see [Connect Your Client](#connect-your-client))
 
 ### Operator API
 
@@ -198,6 +215,7 @@ the organization audit chain before presenting the evidence-pack digest.
 - `POST /requests`
 - `GET /approvals`
 - `POST /approvals/{approval_id}/decision`
+- `POST /requests/{request_id}/lease`
 - `POST /requests/{request_id}/execute`
 - `GET /requests/{request_id}/evidence`
 - `GET /incidents`
@@ -246,6 +264,95 @@ integrations should use the Bearer transport. Real deployments must replace
 these fixtures with workload identity or an organizational authorization
 service.
 
+## Connect Your Client
+
+Point any MCP client that supports the Streamable HTTP transport and custom
+headers at `http://127.0.0.1:8000/mcp` with a Bearer credential. The agent then
+sees every governance decision as a normal tool result:
+
+| Gateway decision | `structuredContent.status` | `isError` |
+| --- | --- | --- |
+| verified low-risk call | `executed` | `false` |
+| high-risk call held for maker-checker | `approval_required` | `false` |
+| policy violation (secret, scope, traversal, production admin) | `denied` | `true` |
+
+### Claude Code
+
+```bash
+claude mcp add --transport http mcp-security-gateway http://127.0.0.1:8000/mcp \
+  --header "Authorization: Bearer msg-ops-demo"
+```
+
+### Cursor (`.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "mcp-security-gateway": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "Authorization": "Bearer msg-ops-demo" }
+    }
+  }
+}
+```
+
+### VS Code (`.vscode/mcp.json`)
+
+```json
+{
+  "servers": {
+    "mcp-security-gateway": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "Authorization": "Bearer msg-ops-demo" }
+    }
+  }
+}
+```
+
+### MCP Python SDK
+
+```python
+import asyncio
+
+from mcp import ClientSession
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
+
+async def main() -> None:
+    http = create_mcp_http_client(headers={"Authorization": "Bearer msg-ops-demo"})
+    async with http, streamable_http_client("http://127.0.0.1:8000/mcp", http_client=http) as streams:
+        async with ClientSession(streams[0], streams[1]) as session:
+            await session.initialize()
+            result = await session.call_tool("kb.search", {"query": "manifest quarantine"})
+            print(result.structured_content["status"])
+
+
+asyncio.run(main())
+```
+
+### Protocol contract
+
+- negotiates MCP `2025-11-25` or `2025-06-18`; a client offering any other
+  revision is answered with `2025-11-25`, the latest supported one;
+- `2025-03-26` is not offered because it requires JSON-RPC batch support;
+- notifications such as `notifications/initialized` return `202 Accepted`
+  with no body;
+- requests without an `id`, or with a `null` id, are rejected with `400`;
+- an `MCP-Protocol-Version` header, when sent, must name a supported revision;
+- capabilities advertise `tools.listChanged: false`, because there is no
+  server-to-client stream (`GET /mcp` returns `405`).
+
+Verification boundary: the official MCP Python SDK 2.3.0 client completed
+`initialize`, `notifications/initialized`, `tools/list`, governed `tools/call`
+outcomes, and `ping` against this gateway, negotiating down from its own
+`2026-07-28` revision. The Claude Code, Cursor, and VS Code snippets follow each
+client's documented remote HTTP format and were not individually exercised.
+
+Authentication is a static Bearer credential. The gateway does not publish
+OAuth 2.1 protected-resource metadata, so clients that only connect to remote
+servers through OAuth discovery cannot use it yet.
+
 ## Guided Demo
 
 1. Open the operator console.
@@ -258,7 +365,8 @@ service.
 4. Switch to `msg-security-demo`.
 5. Approve the exact sandbox-write payload and run the Attack Lab.
 6. Switch back to `msg-ops-demo`.
-7. Execute the one-time lease and open its evidence timeline.
+7. Select **Claim & execute**: only the maker can claim the one-time lease, and
+   the console spends it immediately; then open the evidence timeline.
 8. In Tool Trust, simulate a changed tool description and show the manifest
    drift result.
 
@@ -285,10 +393,15 @@ python -m pip_audit .
 docker compose config --quiet
 ```
 
-The suite covers key migration, credential response shaping, MCP negotiation,
-verified low-risk execution, maker-checker separation, argument-bound leases,
-lease replay, manifest quarantine, DLP blocking, tenant isolation, Origin
-validation, strict request schemas, evidence integrity, and dashboard headers.
+The suite covers key migration, credential response shaping, MCP version
+negotiation, notification handling, a full client handshake,
+verified low-risk execution, maker-checker separation, maker-only lease claims,
+platform-admin execution separation, argument-bound leases, lease replay,
+attack-lab replicas that fail when controls are disabled, manifest quarantine, DLP blocking, sandbox-path rejection before
+approval, audited execution failures, encoded-IPv4 SSRF destinations, tenant
+isolation, Origin validation, strict request schemas, evidence integrity,
+single-source versioning, dashboard headers, and the absence of HTML sinks in
+the dashboard script.
 
 ## Production-shaped, Not Production-ready
 
