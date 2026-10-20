@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-60_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-61_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
@@ -140,16 +140,20 @@ the lab fails when argument DLP or execution binding is disabled.
 
 The dashboard provides:
 
-- live MCP policy and execution traffic;
+- live MCP policy and execution traffic, with the decision reason on every row
+  and an expandable trace of each policy control;
 - tool trust registry with manifest fingerprints;
-- maker-checker approval workbench;
+- maker-checker approval workbench that shows the tool, justification, and
+  redacted payload being approved;
 - maker-only lease claim and execution without browser persistence;
 - attack-lab results;
 - request evidence timeline and chain-integrity status;
 - a four-call guided defense sequence for portfolio presentations.
 
 The UI keeps the entered credential only in JavaScript memory. It does not use
-cookies or browser storage.
+cookies or browser storage. Tool arguments and justifications are
+attacker-controlled, so the console renders them as text only; a test guards the
+shipped script against HTML sinks such as `innerHTML`.
 
 ## Product Tour
 
@@ -393,7 +397,8 @@ platform-admin execution separation, argument-bound leases, lease replay,
 attack-lab replicas that fail when controls are disabled, manifest quarantine, DLP blocking, sandbox-path rejection before
 approval, audited execution failures, encoded-IPv4 SSRF destinations, tenant
 isolation, Origin validation, strict request schemas, evidence integrity,
-single-source versioning, and dashboard headers.
+single-source versioning, dashboard headers, and the absence of HTML sinks in
+the dashboard script.
 
 ## Production-shaped, Not Production-ready
 

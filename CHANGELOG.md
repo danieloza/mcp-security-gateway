@@ -48,10 +48,21 @@ Significant changes to the MCP Security Gateway are documented here.
 - the operator console replaces browser-held leases with a maker-only
   **Claim & execute** action.
 
+### Operator console
+
+- show the decision reason on every live-traffic row and an expandable trace of
+  each policy control with its result and evidence;
+- show the tool, justification, and redacted payload on approval cards, so the
+  checker sees what "Approve exact payload" approves;
+- render attacker-controlled arguments and justifications as text only; a
+  browser probe with `<img onerror>`, `<script>`, and event-handler payloads
+  injected no elements.
+
 ### Testing
 
-- expanded the test suite from 20 to 60 tests, including tests that prove the
-  Attack Lab fails when argument DLP or execution binding is disabled.
+- expanded the test suite from 20 to 61 tests, including tests that prove the
+  Attack Lab fails when argument DLP or execution binding is disabled and a
+  guard against HTML sinks in the dashboard script.
 
 ## [0.2.1] - 2026-07-24
 

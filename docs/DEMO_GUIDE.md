@@ -33,6 +33,11 @@ Explain the four results:
 3. `ops.restart_service` targets privileged production scope and is blocked.
 4. the secret-bearing write is redacted, blocked, and escalated to an incident.
 
+Every row shows its decision reason. Select **Why** on the blocked secret write
+to show the full control trace: identity, manifest, scope, and rate limit pass,
+argument DLP fails with `secret_value`, and the redacted arguments confirm the
+token never reached storage.
+
 ## 4. Demonstrate Separation of Duties
 
 Switch to:

@@ -685,3 +685,11 @@ def test_dashboard_has_security_headers_and_external_assets(tmp_path: Path) -> N
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert 'src="/assets/dashboard.js"' in response.text
     assert "<script>" not in response.text
+
+
+def test_dashboard_renders_untrusted_data_without_html_sinks(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    script = client.get("/assets/dashboard.js").text
+    assert "payloadBlock" in script
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write", "eval(", "new Function"):
+        assert sink not in script
