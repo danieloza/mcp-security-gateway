@@ -4,12 +4,15 @@ Target duration: 6-8 minutes.
 
 ## 1. Establish the Problem
 
-Open the dashboard and explain:
+Open the dashboard. It starts on the module launcher: one tile per module, each
+with a live status. Explain:
 
 > An MCP client can discover tools, but discovery and tool annotations are not
 > authorization. This gateway decides whether the exact call may execute.
 
-Point to the five-step control path: identity, manifest, policy, lease, evidence.
+Open the **Overview** tile and point to the five-step control path: identity,
+manifest, policy, lease, evidence. **All modules** (or `Esc`) returns to the
+launcher at any point.
 
 ## 2. Connect the Operator
 

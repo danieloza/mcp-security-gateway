@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from importlib.metadata import version
 from pathlib import Path
@@ -685,6 +686,19 @@ def test_dashboard_has_security_headers_and_external_assets(tmp_path: Path) -> N
     assert "script-src 'self'" in response.headers["content-security-policy"]
     assert 'src="/assets/dashboard.js"' in response.text
     assert "<script>" not in response.text
+
+
+def test_dashboard_tiles_open_one_existing_module_each(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    page = client.get("/dashboard").text
+    tiles = re.findall(r'<a class="module-tile" href="#([a-z-]+)" data-module="([a-z-]+)">', page)
+    assert {module for _, module in tiles} == {"overview", "traffic", "registry", "approvals", "attack-lab", "evidence"}
+    for href, module in tiles:
+        assert href == module
+        assert re.search(rf'<section class="section" id="{module}"[^>]* hidden>', page)
+        assert f'id="tile-stat-{module}"' in page
+    assert 'id="back-button"' in page
+    assert 'class="sidebar"' not in page
 
 
 def test_dashboard_renders_untrusted_data_without_html_sinks(tmp_path: Path) -> None:

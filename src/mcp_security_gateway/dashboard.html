@@ -8,68 +8,45 @@
       content="Operator console for verified MCP tool execution, approval-bound capability leases, and manifest drift detection."
     />
     <title>MCP Security Gateway</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%2338bdf8' d='M12 2 4.5 5v5.8c0 4.8 3 9.2 7.5 11.2 4.5-2 7.5-6.4 7.5-11.2V5L12 2Z'/%3E%3C/svg%3E"
+    />
     <link rel="stylesheet" href="/assets/dashboard.css" />
     <script src="/assets/dashboard.js" defer></script>
   </head>
   <body>
-    <a class="skip-link" href="#main">Skip to main content</a>
+    <a class="skip-link" href="#main" id="skip-link">Skip to main content</a>
     <div class="app-shell">
-      <aside class="sidebar" aria-label="Primary navigation">
-        <a class="brand" href="#overview" aria-label="MCP Security Gateway overview">
-          <span class="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" role="img">
-              <path d="M12 2 4.5 5v5.8c0 4.8 3 9.2 7.5 11.2 4.5-2 7.5-6.4 7.5-11.2V5L12 2Zm0 3.1 4.7 1.8v3.9c0 3.3-1.8 6.5-4.7 8.1-2.9-1.6-4.7-4.8-4.7-8.1V6.9L12 5.1Z" />
-              <path d="m10.8 14.8-2.2-2.2 1.4-1.4.8.8 3.2-3.2 1.4 1.4-4.6 4.6Z" />
-            </svg>
-          </span>
-          <span>
-            <strong>MCP Security</strong>
-            <small>Verified Execution Gateway</small>
-          </span>
-        </a>
-
-        <nav class="nav-list">
-          <a class="nav-link active" href="#overview">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z" /></svg>
-            Overview
-          </a>
-          <a class="nav-link" href="#traffic">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h4l2-7 4 14 2-7h6v2h-4.5L13 21 9 8l-.5 6H3v-2Z" /></svg>
-            Live traffic
-          </a>
-          <a class="nav-link" href="#registry">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v5H4V4Zm0 7h16v9H4v-9Zm3 3v3h3v-3H7Z" /></svg>
-            Tool trust
-          </a>
-          <a class="nav-link" href="#approvals">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7v3l-2 3v2h7v2H8v2h8v-2h-2v-2h7v-2l-2-3V9a7 7 0 0 0-7-7Zm0 2a5 5 0 0 1 5 5v4l1.3 2H5.7L7 13V9a5 5 0 0 1 5-5Z" /></svg>
-            Approvals
-          </a>
-          <a class="nav-link" href="#attack-lab">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2h6v2h-1v4.6l4.7 7.8A3.7 3.7 0 0 1 15.5 22h-7a3.7 3.7 0 0 1-3.2-5.6L10 8.6V4H9V2Zm3 7.2-5 8.2A1.7 1.7 0 0 0 8.5 20h7a1.7 1.7 0 0 0 1.5-2.6l-1.4-2.3H8.4L12 9.2Z" /></svg>
-            Attack lab
-          </a>
-          <a class="nav-link" href="#evidence">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6V2Zm2 2v16h10V8h-4V4H8Zm2 7h6v2h-6v-2Zm0 4h6v2h-6v-2Z" /></svg>
-            Evidence
-          </a>
-        </nav>
-
-        <div class="sidebar-foot">
-          <span class="environment-dot" aria-hidden="true"></span>
-          <div>
-            <strong>Portfolio runtime</strong>
-            <small>No external tool egress</small>
-          </div>
-        </div>
-      </aside>
-
       <div class="workspace">
         <header class="topbar">
-          <div>
-            <p class="eyebrow">Runtime protection plane</p>
-            <h1>Every tool call earns execution.</h1>
-          </div>
+          <a class="brand" href="#" aria-label="MCP Security Gateway: all modules">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="img">
+                <path d="M12 2 4.5 5v5.8c0 4.8 3 9.2 7.5 11.2 4.5-2 7.5-6.4 7.5-11.2V5L12 2Zm0 3.1 4.7 1.8v3.9c0 3.3-1.8 6.5-4.7 8.1-2.9-1.6-4.7-4.8-4.7-8.1V6.9L12 5.1Z" />
+                <path d="m10.8 14.8-2.2-2.2 1.4-1.4.8.8 3.2-3.2 1.4 1.4-4.6 4.6Z" />
+              </svg>
+            </span>
+            <span>
+              <strong>MCP Security</strong>
+              <small>Verified Execution Gateway</small>
+            </span>
+          </a>
+          <form class="auth-panel" id="auth-form">
+            <label for="api-key">Portfolio API credential</label>
+            <div class="auth-row">
+              <input
+                id="api-key"
+                name="api-key"
+                type="password"
+                autocomplete="off"
+                placeholder="Enter a local demo key from README"
+                required
+              />
+              <button class="button button-primary" type="submit">Connect</button>
+            </div>
+            <small id="auth-context">Credential remains in memory and is never stored by the browser.</small>
+          </form>
           <div class="topbar-actions">
             <span class="system-status" id="system-status">
               <span class="status-pulse" aria-hidden="true"></span>
@@ -82,29 +59,81 @@
           </div>
         </header>
 
-        <main id="main">
-          <section class="section" id="overview" aria-labelledby="overview-title">
-            <div class="section-heading split-heading">
+        <main id="main" tabindex="-1">
+          <section class="home" id="home" aria-labelledby="home-title">
+            <div class="home-heading">
+              <p class="eyebrow">Runtime protection plane</p>
+              <h1 id="home-title" tabindex="-1">Every tool call earns execution.</h1>
+              <p>Choose a module. Each one opens on its own screen, and All modules brings you back here.</p>
+            </div>
+
+            <nav class="module-grid" aria-label="Gateway modules">
+              <a class="module-tile" href="#overview" data-module="overview">
+                <span class="module-corner" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7h10v10h-2v-6.6l-8.3 8.3-1.4-1.4L13.6 9H7V7Z" /></svg></span>
+                <span class="metric-icon cyan" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm10 0h6v-9h-6v9Zm0-16v5h6V4h-6Z" /></svg></span>
+                <strong>Overview</strong>
+                <span class="module-description">Control posture, gateway metrics, and the guided defense sequence.</span>
+                <span class="module-stat" id="tile-stat-overview">Checking gateway…</span>
+              </a>
+              <a class="module-tile" href="#traffic" data-module="traffic">
+                <span class="module-corner" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7h10v10h-2v-6.6l-8.3 8.3-1.4-1.4L13.6 9H7V7Z" /></svg></span>
+                <span class="metric-icon green" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12h4l2-7 4 14 2-7h6v2h-4.5L13 21 9 8l-.5 6H3v-2Z" /></svg></span>
+                <strong>Live traffic</strong>
+                <span class="module-description">Every MCP call with its policy decision, reason, and control trace.</span>
+                <span class="module-stat" id="tile-stat-traffic">Connect to inspect traffic</span>
+              </a>
+              <a class="module-tile" href="#registry" data-module="registry">
+                <span class="module-corner" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7h10v10h-2v-6.6l-8.3 8.3-1.4-1.4L13.6 9H7V7Z" /></svg></span>
+                <span class="metric-icon violet" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 4h16v5H4V4Zm0 7h16v9H4v-9Zm3 3v3h3v-3H7Z" /></svg></span>
+                <strong>Tool trust</strong>
+                <span class="module-description">Pinned tool manifests, rug-pull drift checks, and quarantine.</span>
+                <span class="module-stat" id="tile-stat-registry">—</span>
+              </a>
+              <a class="module-tile" href="#approvals" data-module="approvals">
+                <span class="module-corner" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7h10v10h-2v-6.6l-8.3 8.3-1.4-1.4L13.6 9H7V7Z" /></svg></span>
+                <span class="metric-icon amber" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7v3l-2 3v2h7v2H8v2h8v-2h-2v-2h7v-2l-2-3V9a7 7 0 0 0-7-7Zm0 2a5 5 0 0 1 5 5v4l1.3 2H5.7L7 13V9a5 5 0 0 1 5-5Z" /></svg></span>
+                <strong>Approvals</strong>
+                <span class="module-description">Maker-checker review of the exact payload before any lease exists.</span>
+                <span class="module-stat" id="tile-stat-approvals">—</span>
+              </a>
+              <a class="module-tile" href="#attack-lab" data-module="attack-lab">
+                <span class="module-corner" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7h10v10h-2v-6.6l-8.3 8.3-1.4-1.4L13.6 9H7V7Z" /></svg></span>
+                <span class="metric-icon red" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 2h6v2h-1v4.6l4.7 7.8A3.7 3.7 0 0 1 15.5 22h-7a3.7 3.7 0 0 1-3.2-5.6L10 8.6V4H9V2Zm3 7.2-5 8.2A1.7 1.7 0 0 0 8.5 20h7a1.7 1.7 0 0 0 1.5-2.6l-1.4-2.3H8.4L12 9.2Z" /></svg></span>
+                <strong>Attack lab</strong>
+                <span class="module-description">MCP abuse cases replayed through the real gateway flow.</span>
+                <span class="module-stat" id="tile-stat-attack-lab">Not run yet</span>
+              </a>
+              <a class="module-tile" href="#evidence" data-module="evidence">
+                <span class="module-corner" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 7h10v10h-2v-6.6l-8.3 8.3-1.4-1.4L13.6 9H7V7Z" /></svg></span>
+                <span class="metric-icon cyan" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15H6V2Zm2 2v16h10V8h-4V4H8Zm2 7h6v2h-6v-2Zm0 4h6v2h-6v-2Z" /></svg></span>
+                <strong>Evidence</strong>
+                <span class="module-description">One request, one tamper-evident audit chain and evidence digest.</span>
+                <span class="module-stat" id="tile-stat-evidence">Pick a request in Live traffic</span>
+              </a>
+            </nav>
+
+            <footer class="home-foot">
+              <span class="environment-dot" aria-hidden="true"></span>
               <div>
-                <p class="eyebrow">Control posture</p>
-                <h2 id="overview-title">Verified execution overview</h2>
-                <p>Identity, pinned manifests, deterministic policy, maker-checker approval, and tamper-evident evidence in one bounded path.</p>
+                <strong>Portfolio runtime</strong>
+                <small>No external tool egress</small>
               </div>
-              <form class="auth-panel" id="auth-form">
-                <label for="api-key">Portfolio API credential</label>
-                <div class="auth-row">
-                  <input
-                    id="api-key"
-                    name="api-key"
-                    type="password"
-                    autocomplete="off"
-                    placeholder="Enter a local demo key from README"
-                    required
-                  />
-                  <button class="button button-primary" type="submit">Connect</button>
-                </div>
-                <small id="auth-context">Credential remains in memory and is never stored by the browser.</small>
-              </form>
+            </footer>
+          </section>
+
+          <div class="module-bar" id="module-bar" hidden>
+            <a class="button button-secondary" href="#" id="back-button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2Z" /></svg>
+              All modules
+            </a>
+            <p class="module-crumb">Control panel <span aria-hidden="true">/</span> <strong id="module-crumb-name">Overview</strong></p>
+          </div>
+
+          <section class="section" id="overview" aria-labelledby="overview-title" hidden>
+            <div class="section-heading">
+              <p class="eyebrow">Control posture</p>
+              <h2 id="overview-title" tabindex="-1">Verified execution overview</h2>
+              <p>Identity, pinned manifests, deterministic policy, maker-checker approval, and tamper-evident evidence in one bounded path.</p>
             </div>
 
             <div class="metrics" aria-label="Gateway metrics">
@@ -154,10 +183,10 @@
             </div>
           </section>
 
-          <section class="section" id="traffic" aria-labelledby="traffic-title">
+          <section class="section" id="traffic" aria-labelledby="traffic-title" hidden>
             <div class="section-heading">
               <p class="eyebrow">Live MCP traffic</p>
-              <h2 id="traffic-title">Policy decisions before execution</h2>
+              <h2 id="traffic-title" tabindex="-1">Policy decisions before execution</h2>
               <p>Every row carries a policy version, manifest fingerprint, payload digest, and execution state.</p>
             </div>
             <div class="table-panel">
@@ -181,10 +210,10 @@
             </div>
           </section>
 
-          <section class="section" id="registry" aria-labelledby="registry-title">
+          <section class="section" id="registry" aria-labelledby="registry-title" hidden>
             <div class="section-heading">
               <p class="eyebrow">Tool trust registry</p>
-              <h2 id="registry-title">Detect MCP rug pulls before calls move</h2>
+              <h2 id="registry-title" tabindex="-1">Detect MCP rug pulls before calls move</h2>
               <p>Descriptions, JSON schemas, risk metadata, and annotations are fingerprinted. Server-provided hints inform UX but never become authority.</p>
             </div>
             <div class="registry-grid" id="registry-grid">
@@ -192,10 +221,10 @@
             </div>
           </section>
 
-          <section class="section" id="approvals" aria-labelledby="approvals-title">
+          <section class="section" id="approvals" aria-labelledby="approvals-title" hidden>
             <div class="section-heading">
               <p class="eyebrow">Maker-checker workbench</p>
-              <h2 id="approvals-title">Approval is bound to immutable evidence</h2>
+              <h2 id="approvals-title" tabindex="-1">Approval is bound to immutable evidence</h2>
               <p>An approval lets only the maker claim one short-lived capability lease; the checker never holds it. Any argument or manifest change invalidates execution.</p>
             </div>
             <div class="approval-grid" id="approval-grid">
@@ -203,11 +232,11 @@
             </div>
           </section>
 
-          <section class="section" id="attack-lab" aria-labelledby="lab-title">
+          <section class="section" id="attack-lab" aria-labelledby="lab-title" hidden>
             <div class="section-heading split-heading">
               <div>
                 <p class="eyebrow">MCP attack lab</p>
-                <h2 id="lab-title">Adversarial controls as executable evidence</h2>
+                <h2 id="lab-title" tabindex="-1">Adversarial controls as executable evidence</h2>
                 <p>Run deterministic tests for schema drift, approval tampering, secret exfiltration, SSRF, and plaintext key storage.</p>
               </div>
               <button class="button button-danger" id="attack-lab-button" type="button">Run security suite</button>
@@ -219,10 +248,10 @@
             <div class="lab-grid" id="lab-grid"></div>
           </section>
 
-          <section class="section" id="evidence" aria-labelledby="evidence-title">
+          <section class="section" id="evidence" aria-labelledby="evidence-title" hidden>
             <div class="section-heading">
               <p class="eyebrow">Evidence explorer</p>
-              <h2 id="evidence-title">One request, one defensible chain</h2>
+              <h2 id="evidence-title" tabindex="-1">One request, one defensible chain</h2>
               <p>Inspect the decision, approval, execution, and audit integrity for a selected request.</p>
             </div>
             <div class="evidence-panel" id="evidence-panel">
