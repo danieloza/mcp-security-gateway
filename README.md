@@ -13,7 +13,7 @@
 
 [Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
-![MCP Security Gateway operator console](docs/assets/gateway-dashboard.png)
+![MCP Security Gateway module launcher with live status for each module](docs/assets/gateway-dashboard.png)
 
 ## What It Solves
 
@@ -438,7 +438,7 @@ See [Threat Model](docs/THREAT_MODEL.md) and
 ## Proof Assets
 
 - animated product demo: [docs/assets/mcp-security-gateway-demo.gif](docs/assets/mcp-security-gateway-demo.gif)
-- operator dashboard: [docs/assets/gateway-dashboard.png](docs/assets/gateway-dashboard.png)
+- module launcher: [docs/assets/gateway-dashboard.png](docs/assets/gateway-dashboard.png)
 - policy enforcement: [docs/assets/policy-enforcement.png](docs/assets/policy-enforcement.png)
 - maker-checker approval: [docs/assets/approval-workbench.png](docs/assets/approval-workbench.png)
 - Attack Lab: [docs/assets/attack-lab.png](docs/assets/attack-lab.png)

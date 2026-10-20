@@ -16,7 +16,10 @@ Significant changes to the MCP Security Gateway are documented here.
   module, and move focus to the module heading when a module opens;
 - add a brand favicon as a `data:` URI, removing the `favicon.ico` 404 from
   the browser console;
-- add a test that every tile opens exactly one existing module (62 tests).
+- add a test that every tile opens exactly one existing module (62 tests);
+- refreshed the product screenshots and demo GIF from a clean demo database:
+  the README hero is now the launcher with live status after the full
+  walkthrough, and each module frame shows the All modules bar.
 
 ## [0.3.0] - 2026-10-20
 
