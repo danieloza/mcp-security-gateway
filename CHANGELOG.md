@@ -56,7 +56,11 @@ Significant changes to the MCP Security Gateway are documented here.
   checker sees what "Approve exact payload" approves;
 - render attacker-controlled arguments and justifications as text only; a
   browser probe with `<img onerror>`, `<script>`, and event-handler payloads
-  injected no elements.
+  injected no elements;
+- keep request row actions on one line when a decision trace is expanded;
+- refreshed the product screenshots and demo GIF from a clean demo database so
+  they show decision traces, approval payloads, replayed attacks, and the lease
+  claim.
 
 ### Testing
 

@@ -44,11 +44,11 @@ maker-checker approval, adversarial security tests, execution, and evidence.
 
 | Stage | Control | Observable proof |
 | --- | --- | --- |
-| Request | Scope, environment, DLP, and rate policy | `executed`, `awaiting approval`, or `blocked` before side effects |
-| Approval | Maker-checker separation | Exact payload digest and assigned checker |
-| Attack testing | Deterministic MCP abuse cases | Rug pull, tampering, secret egress, SSRF, and key-storage checks |
-| Execution | One-time capability lease | Caller, manifest, arguments, policy, and expiry re-verified |
-| Evidence | HMAC-linked audit events | Policy, approval, and execution chain with integrity status |
+| Request | Scope, environment, DLP, rate, and adapter policy | `executed`, `awaiting approval`, or `blocked` before side effects, with the reason and per-control trace |
+| Approval | Maker-checker separation | Tool, justification, redacted payload, and digest shown to the checker |
+| Attack testing | MCP abuse cases replayed through the gateway | Rug pull, tampering, secret egress, encoded SSRF, and key-storage checks |
+| Execution | One-time capability lease claimed by the maker | Caller, manifest, arguments, policy, and expiry re-verified |
+| Evidence | HMAC-linked audit events | Policy, approval, lease claim, and execution chain with integrity status |
 
 The operator-led version takes about 90 seconds. See the
 [presenter script](docs/DEMO_GUIDE.md) for the exact credential switches and
@@ -162,34 +162,37 @@ by the automated tests.
 
 ### 1. Policy enforcement before execution
 
-![Policy decisions and pinned MCP tool manifests](docs/assets/policy-enforcement.png)
+![Policy decisions with an expanded control trace](docs/assets/policy-enforcement.png)
 
 One table separates policy decision from execution state. Safe knowledge access
 executes, a regulated write pauses, and forbidden production or secret-bearing
-calls are contained.
+calls are contained. Every row states its reason; the expanded trace shows
+argument DLP failing on a secret while the stored arguments stay redacted.
 
 ### 2. Maker-checker approval bound to the payload
 
 ![Maker-checker exact payload approval](docs/assets/approval-workbench.png)
 
-The reviewer sees the request identity, payload digest, maker, and checker.
-Approval lets only the maker claim a short-lived capability lease for that
-immutable payload.
+The reviewer sees the tool, justification, redacted payload, payload digest,
+maker, and checker. Approval lets only the maker claim a short-lived capability
+lease for that immutable payload.
 
 ### 3. Adversarial controls as executable evidence
 
 ![MCP Attack Lab showing five verified controls](docs/assets/attack-lab.png)
 
-The Attack Lab verifies manifest rug-pull detection, post-approval argument
-tampering, secret exfiltration, cloud-metadata SSRF, and digest-only API-key
-storage.
+The Attack Lab replays manifest rug pulls, post-approval argument tampering,
+secret exfiltration, and a decimal-encoded cloud-metadata SSRF destination
+through the real gateway flow on an isolated replica, and checks digest-only
+API-key storage. Each card shows the gateway's own rejection.
 
 ### 4. Tamper-evident evidence chain
 
-![Verified policy approval and execution evidence chain](docs/assets/evidence-chain.png)
+![Verified policy, approval, lease, and execution evidence chain](docs/assets/evidence-chain.png)
 
-The evidence explorer links policy, approval, and execution events and verifies
-the organization audit chain before presenting the evidence-pack digest.
+The evidence explorer links the policy decision, the checker's approval, the
+maker's lease claim, and the execution, and verifies the organization audit
+chain before presenting the evidence-pack digest.
 
 ## API Surface
 
