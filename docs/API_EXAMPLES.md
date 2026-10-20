@@ -42,8 +42,25 @@ curl -s -X POST "$GATEWAY/mcp" \
   -H "Authorization: Bearer $OPERATOR_KEY" \
   -H "Mcp-Method: initialize" \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
 ```
+
+The response echoes `2025-06-18`. A client that offers an unsupported revision
+receives `2025-11-25`, the latest one the gateway supports.
+
+## Acknowledge Initialization
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST "$GATEWAY/mcp" \
+  -H "Authorization: Bearer $OPERATOR_KEY" \
+  -H "MCP-Protocol-Version: 2025-06-18" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+```
+
+Notifications return `202` with no body. Send the negotiated
+`MCP-Protocol-Version` header on later requests; an unsupported value is
+rejected with `400`.
 
 ## List Verified Tools
 

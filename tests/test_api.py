@@ -370,6 +370,111 @@ def test_mcp_origin_and_header_mismatch_are_rejected(tmp_path: Path) -> None:
     assert mismatch.status_code == 400
 
 
+@pytest.mark.parametrize(
+    ("requested", "negotiated"),
+    [
+        ("2025-11-25", "2025-11-25"),
+        ("2025-06-18", "2025-06-18"),
+        ("2025-03-26", "2025-11-25"),
+        ("2024-11-05", "2025-11-25"),
+        (None, "2025-11-25"),
+    ],
+)
+def test_mcp_initialize_negotiates_protocol_version(
+    tmp_path: Path,
+    requested: str | None,
+    negotiated: str,
+) -> None:
+    client, _, _ = make_client(tmp_path)
+    params = {"protocolVersion": requested} if requested else {}
+    response = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": params},
+    )
+    assert response.status_code == 200
+    assert response.json()["result"]["protocolVersion"] == negotiated
+
+
+def test_mcp_capabilities_do_not_promise_list_change_notifications(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    initialize = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
+    stream = client.get("/mcp", headers={**OPERATOR, "Accept": "text/event-stream"})
+    assert initialize.json()["result"]["capabilities"] == {"tools": {"listChanged": False}}
+    assert stream.status_code == 405
+
+
+@pytest.mark.parametrize("method", ["notifications/initialized", "notifications/cancelled"])
+def test_mcp_notifications_are_accepted_without_a_body(tmp_path: Path, method: str) -> None:
+    client, _, _ = make_client(tmp_path)
+    response = client.post("/mcp", headers=OPERATOR, json={"jsonrpc": "2.0", "method": method})
+    assert response.status_code == 202
+    assert response.content == b""
+
+
+def test_mcp_request_without_id_or_with_null_id_is_rejected(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    missing = client.post("/mcp", headers=OPERATOR, json={"jsonrpc": "2.0", "method": "tools/list"})
+    null = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": None, "method": "tools/list"},
+    )
+    assert missing.status_code == 400
+    assert null.status_code == 400
+
+
+def test_mcp_protocol_version_header_is_validated(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    body = {"jsonrpc": "2.0", "id": 1, "method": "ping"}
+    supported = client.post("/mcp", headers={**OPERATOR, "MCP-Protocol-Version": "2025-06-18"}, json=body)
+    unsupported = client.post("/mcp", headers={**OPERATOR, "MCP-Protocol-Version": "2024-11-05"}, json=body)
+    assert supported.status_code == 200
+    assert unsupported.status_code == 400
+
+
+def test_mcp_client_handshake_reaches_a_governed_tool_call(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    initialize = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "handshake-test", "version": "1.0"},
+            },
+        },
+    )
+    session = {**OPERATOR, "MCP-Protocol-Version": initialize.json()["result"]["protocolVersion"]}
+    initialized = client.post(
+        "/mcp",
+        headers=session,
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+    )
+    tools = client.post("/mcp", headers=session, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    call = client.post(
+        "/mcp",
+        headers=session,
+        json={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "kb.search", "arguments": {"query": "manifest quarantine"}},
+        },
+    )
+    assert initialized.status_code == 202
+    assert "kb.search" in {tool["name"] for tool in tools.json()["result"]["tools"]}
+    assert call.json()["result"]["structuredContent"]["status"] == "executed"
+
+
 def test_schema_rejects_unexpected_request_fields(tmp_path: Path) -> None:
     client, _, _ = make_client(tmp_path)
     response = client.post(

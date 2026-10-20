@@ -4,7 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -43,6 +43,17 @@ from mcp_security_gateway.tool_registry import public_manifest
 
 
 rate_limit_store = build_rate_limit_store(redis_url())
+
+# Streamable HTTP revisions without JSON-RPC batching. 2025-03-26 is omitted on purpose:
+# it requires servers to accept batches, which this gateway rejects.
+SUPPORTED_PROTOCOL_VERSIONS = ("2025-11-25", "2025-06-18")
+
+
+def negotiate_protocol_version(requested: object) -> str:
+    """Echo the client's version when supported, otherwise offer the latest one."""
+    if isinstance(requested, str) and requested in SUPPORTED_PROTOCOL_VERSIONS:
+        return requested
+    return SUPPORTED_PROTOCOL_VERSIONS[0]
 
 
 def get_repository() -> SQLiteRepository:
@@ -361,19 +372,38 @@ def create_app(
             _raise_service_error(exc)
         return AttackLabOut(**result)
 
-    @app.post("/mcp")
+    @app.post("/mcp", response_model=None)
     def mcp_gateway(
         payload: MCPRequestIn,
         origin: str | None = Header(default=None),
         mcp_method: str | None = Header(default=None, alias="Mcp-Method"),
         mcp_name: str | None = Header(default=None, alias="Mcp-Name"),
+        protocol_version: str | None = Header(default=None, alias="MCP-Protocol-Version"),
         auth: AuthContext = Depends(get_current_auth),
         service: GatewayService = Depends(get_service),
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | Response:
         if origin and origin.rstrip("/") not in allowed_origins():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Origin is not allowlisted for MCP transport.",
+            )
+        if protocol_version and protocol_version not in SUPPORTED_PROTOCOL_VERSIONS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported MCP-Protocol-Version; supported: {', '.join(SUPPORTED_PROTOCOL_VERSIONS)}.",
+            )
+        if "id" not in payload.model_fields_set:
+            # A message without an id is a notification: accept it without a JSON-RPC response.
+            if payload.method.startswith("notifications/"):
+                return Response(status_code=status.HTTP_202_ACCEPTED)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="JSON-RPC requests must include an id; only notifications may omit it.",
+            )
+        if payload.id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="MCP request ids must be a string or an integer, not null.",
             )
         if mcp_method and mcp_method != payload.method:
             raise HTTPException(
@@ -393,8 +423,9 @@ def create_app(
                 "jsonrpc": "2.0",
                 "id": payload.id,
                 "result": {
-                    "protocolVersion": "2025-11-25",
-                    "capabilities": {"tools": {"listChanged": True}},
+                    "protocolVersion": negotiate_protocol_version(payload.params.get("protocolVersion")),
+                    # No server-to-client stream exists (GET /mcp is 405), so list changes are never announced.
+                    "capabilities": {"tools": {"listChanged": False}},
                     "serverInfo": {
                         "name": "mcp-security-gateway",
                         "version": __version__,

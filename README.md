@@ -7,11 +7,11 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-43_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-54_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
-[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
+[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
 ![MCP Security Gateway operator console](docs/assets/gateway-dashboard.png)
 
@@ -182,7 +182,8 @@ the organization audit chain before presenting the evidence-pack digest.
 
 ### MCP protocol boundary
 
-- `POST /mcp` — `initialize`, `ping`, `tools/list`, and `tools/call`
+- `POST /mcp` — `initialize`, `ping`, `tools/list`, `tools/call`, and
+  `notifications/*` (see [Connect Your Client](#connect-your-client))
 
 ### Operator API
 
@@ -246,6 +247,95 @@ integrations should use the Bearer transport. Real deployments must replace
 these fixtures with workload identity or an organizational authorization
 service.
 
+## Connect Your Client
+
+Point any MCP client that supports the Streamable HTTP transport and custom
+headers at `http://127.0.0.1:8000/mcp` with a Bearer credential. The agent then
+sees every governance decision as a normal tool result:
+
+| Gateway decision | `structuredContent.status` | `isError` |
+| --- | --- | --- |
+| verified low-risk call | `executed` | `false` |
+| high-risk call held for maker-checker | `approval_required` | `false` |
+| policy violation (secret, scope, traversal, production admin) | `denied` | `true` |
+
+### Claude Code
+
+```bash
+claude mcp add --transport http mcp-security-gateway http://127.0.0.1:8000/mcp \
+  --header "Authorization: Bearer msg-ops-demo"
+```
+
+### Cursor (`.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "mcp-security-gateway": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "Authorization": "Bearer msg-ops-demo" }
+    }
+  }
+}
+```
+
+### VS Code (`.vscode/mcp.json`)
+
+```json
+{
+  "servers": {
+    "mcp-security-gateway": {
+      "type": "http",
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "Authorization": "Bearer msg-ops-demo" }
+    }
+  }
+}
+```
+
+### MCP Python SDK
+
+```python
+import asyncio
+
+from mcp import ClientSession
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
+
+
+async def main() -> None:
+    http = create_mcp_http_client(headers={"Authorization": "Bearer msg-ops-demo"})
+    async with http, streamable_http_client("http://127.0.0.1:8000/mcp", http_client=http) as streams:
+        async with ClientSession(streams[0], streams[1]) as session:
+            await session.initialize()
+            result = await session.call_tool("kb.search", {"query": "manifest quarantine"})
+            print(result.structured_content["status"])
+
+
+asyncio.run(main())
+```
+
+### Protocol contract
+
+- negotiates MCP `2025-11-25` or `2025-06-18`; a client offering any other
+  revision is answered with `2025-11-25`, the latest supported one;
+- `2025-03-26` is not offered because it requires JSON-RPC batch support;
+- notifications such as `notifications/initialized` return `202 Accepted`
+  with no body;
+- requests without an `id`, or with a `null` id, are rejected with `400`;
+- an `MCP-Protocol-Version` header, when sent, must name a supported revision;
+- capabilities advertise `tools.listChanged: false`, because there is no
+  server-to-client stream (`GET /mcp` returns `405`).
+
+Verification boundary: the official MCP Python SDK 2.3.0 client completed
+`initialize`, `notifications/initialized`, `tools/list`, governed `tools/call`
+outcomes, and `ping` against this gateway, negotiating down from its own
+`2026-07-28` revision. The Claude Code, Cursor, and VS Code snippets follow each
+client's documented remote HTTP format and were not individually exercised.
+
+Authentication is a static Bearer credential. The gateway does not publish
+OAuth 2.1 protected-resource metadata, so clients that only connect to remote
+servers through OAuth discovery cannot use it yet.
+
 ## Guided Demo
 
 1. Open the operator console.
@@ -285,7 +375,8 @@ python -m pip_audit .
 docker compose config --quiet
 ```
 
-The suite covers key migration, credential response shaping, MCP negotiation,
+The suite covers key migration, credential response shaping, MCP version
+negotiation, notification handling, a full client handshake,
 verified low-risk execution, maker-checker separation, argument-bound leases,
 lease replay, manifest quarantine, DLP blocking, sandbox-path rejection before
 approval, audited execution failures, encoded-IPv4 SSRF destinations, tenant

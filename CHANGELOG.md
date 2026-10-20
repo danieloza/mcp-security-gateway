@@ -17,8 +17,26 @@ Significant changes to the MCP Security Gateway are documented here.
   `100.100.100.200` as forbidden destinations; malformed numeric hosts fail
   closed;
 - read the package, API, and MCP `serverInfo` version from a single
-  `__version__` source;
-- expanded the test suite from 20 to 43 tests.
+  `__version__` source.
+
+### MCP protocol compliance
+
+- negotiate the protocol version: echo `2025-11-25` or `2025-06-18` when the
+  client offers it, otherwise answer with `2025-11-25`; `2025-03-26` is not
+  offered because it requires JSON-RPC batch support;
+- acknowledge notifications such as `notifications/initialized` with
+  `202 Accepted` and no body instead of a JSON-RPC error;
+- reject requests without an `id` or with a `null` id, and an unsupported
+  `MCP-Protocol-Version` header, with `400`;
+- advertise `tools.listChanged: false`, because the gateway has no
+  server-to-client stream;
+- added a "Connect Your Client" README section for Claude Code, Cursor,
+  VS Code, and the MCP Python SDK; the official SDK 2.3.0 client completed a
+  full governed session against the gateway.
+
+### Testing
+
+- expanded the test suite from 20 to 54 tests.
 
 ## [0.2.1] - 2026-07-24
 

@@ -37,16 +37,23 @@ authoritative for the portfolio runtime.
 
 `POST /mcp` supports:
 
-- `initialize`;
+- `initialize`, negotiating MCP `2025-11-25` or `2025-06-18`;
 - `ping`;
 - `tools/list`;
-- `tools/call`.
+- `tools/call`;
+- `notifications/*`, acknowledged with `202 Accepted` and no body.
+
+The gateway advertises `tools.listChanged: false` and answers `GET /mcp` with
+`405`, because it keeps no server-to-client stream. `2025-03-26` is not offered,
+since that revision requires JSON-RPC batch support.
 
 The transport validates:
 
 - `Authorization: Bearer` credentials;
 - an allowlisted browser `Origin`, when present;
 - consistency between `Mcp-Method` / `Mcp-Name` headers and the JSON-RPC body;
+- a supported `MCP-Protocol-Version` header, when present;
+- a string or integer request `id` (only notifications may omit it);
 - strict Pydantic envelopes and a bounded Content-Length;
 - tenant membership before exposing server or tool inventory.
 
