@@ -9,7 +9,6 @@ const state = {
   approvals: [],
   incidents: [],
   demoArguments: new Map(),
-  leases: new Map(),
 };
 
 const byId = (id) => document.getElementById(id);
@@ -160,8 +159,9 @@ function renderRequests() {
     evidenceButton.type = "button";
     evidenceButton.addEventListener("click", () => loadEvidence(request.id));
     actionsCell.append(evidenceButton);
-    if (state.leases.has(request.id) && state.demoArguments.has(request.id)) {
-      const executeButton = textElement("button", "Execute lease", "button button-primary button-small");
+    const isMaker = state.user && state.user.id === request.requested_by;
+    if (isMaker && request.execution_status === "lease_ready" && state.demoArguments.has(request.id)) {
+      const executeButton = textElement("button", "Claim & execute", "button button-primary button-small");
       executeButton.type = "button";
       executeButton.addEventListener("click", () => executeLease(request.id));
       actionsCell.append(" ", executeButton);
@@ -324,9 +324,8 @@ async function decideApproval(approval, decision) {
       method: "POST",
       body: JSON.stringify({ decision }),
     });
-    if (result.capability_lease) {
-      state.leases.set(approval.request_id, result.capability_lease);
-      toast("Exact payload approved. One-time lease held only in browser memory.");
+    if (result.approval.status === "approved") {
+      toast("Exact payload approved. Only the maker can claim the one-time lease.");
     } else {
       toast("Request denied and contained.");
     }
@@ -337,18 +336,18 @@ async function decideApproval(approval, decision) {
 }
 
 async function executeLease(requestId) {
-  const lease = state.leases.get(requestId);
   const argumentsValue = state.demoArguments.get(requestId);
-  if (!lease || !argumentsValue) {
-    toast("The browser no longer holds the exact arguments and lease.", true);
+  if (!argumentsValue) {
+    toast("The browser no longer holds the exact arguments for this request.", true);
     return;
   }
   try {
+    // The maker claims the lease and spends it immediately; the token never outlives this call.
+    const claim = await api(`/requests/${encodeURIComponent(requestId)}/lease`, { method: "POST" });
     const execution = await api(`/requests/${encodeURIComponent(requestId)}/execute`, {
       method: "POST",
-      body: JSON.stringify({ arguments: argumentsValue, capability_lease: lease }),
+      body: JSON.stringify({ arguments: argumentsValue, capability_lease: claim.capability_lease }),
     });
-    state.leases.delete(requestId);
     toast(`Controlled execution ${short(execution.id, 18)} succeeded.`);
     await loadAuthenticatedData();
     await loadEvidence(requestId);

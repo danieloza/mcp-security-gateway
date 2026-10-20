@@ -27,6 +27,7 @@ from mcp_security_gateway.schemas import (
     ExecutionOut,
     HealthOut,
     IncidentOut,
+    LeaseClaimOut,
     ManifestCandidateIn,
     ManifestVerificationOut,
     MCPRequestIn,
@@ -315,13 +316,25 @@ def create_app(
         service: GatewayService = Depends(get_service),
     ) -> ApprovalDecisionOut:
         try:
-            approval, grant = service.decide_approval(auth, approval_id, payload.decision)
+            approval = service.decide_approval(auth, approval_id, payload.decision)
         except (PermissionError, ValueError) as exc:
             _raise_service_error(exc)
-        return ApprovalDecisionOut(
-            approval=ApprovalOut(**asdict(approval)),
-            capability_lease=grant.token if grant else None,
-            expires_at=grant.expires_at if grant else None,
+        return ApprovalDecisionOut(approval=ApprovalOut(**asdict(approval)))
+
+    @app.post("/requests/{request_id}/lease", response_model=LeaseClaimOut)
+    def claim_capability_lease(
+        request_id: str,
+        auth: AuthContext = Depends(get_current_auth),
+        service: GatewayService = Depends(get_service),
+    ) -> LeaseClaimOut:
+        try:
+            grant = service.claim_lease(auth, request_id)
+        except (PermissionError, ValueError) as exc:
+            _raise_service_error(exc)
+        return LeaseClaimOut(
+            request_id=request_id,
+            capability_lease=grant.token,
+            expires_at=grant.expires_at,
         )
 
     @app.post("/requests/{request_id}/execute", response_model=ExecutionOut)

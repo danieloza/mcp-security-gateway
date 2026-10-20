@@ -34,9 +34,24 @@ Significant changes to the MCP Security Gateway are documented here.
   VS Code, and the MCP Python SDK; the official SDK 2.3.0 client completed a
   full governed session against the gateway.
 
+### Separation of duties and honest attack testing
+
+- approval no longer returns a capability lease to the checker; the request
+  becomes `lease_ready`, and only the maker can claim the lease once through
+  `POST /requests/{request_id}/lease`, recorded as a `lease_claimed` event;
+- removed the platform-administrator override that allowed executing another
+  workload's approved request;
+- the Attack Lab now replays rug pull, approval tampering, secret egress, and a
+  decimal-encoded SSRF destination through the real gateway flow on an
+  isolated, freshly seeded replica instead of comparing constants; crashing
+  probes are reported as failed controls;
+- the operator console replaces browser-held leases with a maker-only
+  **Claim & execute** action.
+
 ### Testing
 
-- expanded the test suite from 20 to 54 tests.
+- expanded the test suite from 20 to 60 tests, including tests that prove the
+  Attack Lab fails when argument DLP or execution binding is disabled.
 
 ## [0.2.1] - 2026-07-24
 

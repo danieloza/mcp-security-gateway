@@ -640,6 +640,7 @@ tbody tr:hover {
 
 .badge-awaiting_approval,
 .badge-approval_required,
+.badge-lease_ready,
 .badge-lease_issued,
 .badge-pending {
   border-color: rgb(245 158 11 / 0.28);

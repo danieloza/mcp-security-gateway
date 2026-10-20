@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-54_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-60_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
@@ -106,8 +106,9 @@ the gateway does not treat server-provided hints as authorization.
 
 ### Approval-bound capability leases
 
-High-risk calls are held before execution. An approved call receives a random,
-short-lived, one-use lease bound to:
+High-risk calls are held before execution. Approval itself hands out no
+credential: the checker authorizes, and only the requesting workload can then
+claim a random, short-lived, one-use lease bound to:
 
 - tenant and requesting workload;
 - server, tool, scope, and policy version;
@@ -116,17 +117,24 @@ short-lived, one-use lease bound to:
 - complete governed-request digest.
 
 Changing the path, payload, tool schema, caller, or policy context invalidates
-execution. Reusing the lease is rejected.
+execution. Reusing or re-claiming the lease is rejected. Neither the checker nor
+a platform administrator can claim or execute another workload's lease.
 
 ### MCP Attack Lab
 
-The operator console runs deterministic checks for:
+The operator console replays each attack through the real gateway flow —
+submission, policy, approval, lease claim, and execution — on an isolated,
+freshly seeded replica, so the live tenant's traffic and incidents stay
+untouched:
 
-- tool-description rug pull / manifest drift;
-- argument substitution after approval;
+- tool-description rug pull followed by a call to the drifted tool;
+- argument substitution after approval and lease claim;
 - secret-bearing tool arguments;
-- cloud-metadata SSRF destinations;
-- plaintext API-key persistence.
+- a decimal-encoded cloud-metadata SSRF destination;
+- plaintext API-key persistence (checked against the live schema).
+
+A probe that crashes is reported as a failed control, and the test suite proves
+the lab fails when argument DLP or execution binding is disabled.
 
 ## Operator Console
 
@@ -135,7 +143,7 @@ The dashboard provides:
 - live MCP policy and execution traffic;
 - tool trust registry with manifest fingerprints;
 - maker-checker approval workbench;
-- one-time lease visibility without browser persistence;
+- maker-only lease claim and execution without browser persistence;
 - attack-lab results;
 - request evidence timeline and chain-integrity status;
 - a four-call guided defense sequence for portfolio presentations.
@@ -161,7 +169,8 @@ calls are contained.
 ![Maker-checker exact payload approval](docs/assets/approval-workbench.png)
 
 The reviewer sees the request identity, payload digest, maker, and checker.
-Approval creates a short-lived capability lease for that immutable payload only.
+Approval lets only the maker claim a short-lived capability lease for that
+immutable payload.
 
 ### 3. Adversarial controls as executable evidence
 
@@ -199,6 +208,7 @@ the organization audit chain before presenting the evidence-pack digest.
 - `POST /requests`
 - `GET /approvals`
 - `POST /approvals/{approval_id}/decision`
+- `POST /requests/{request_id}/lease`
 - `POST /requests/{request_id}/execute`
 - `GET /requests/{request_id}/evidence`
 - `GET /incidents`
@@ -348,7 +358,8 @@ servers through OAuth discovery cannot use it yet.
 4. Switch to `msg-security-demo`.
 5. Approve the exact sandbox-write payload and run the Attack Lab.
 6. Switch back to `msg-ops-demo`.
-7. Execute the one-time lease and open its evidence timeline.
+7. Select **Claim & execute**: only the maker can claim the one-time lease, and
+   the console spends it immediately; then open the evidence timeline.
 8. In Tool Trust, simulate a changed tool description and show the manifest
    drift result.
 
@@ -377,8 +388,9 @@ docker compose config --quiet
 
 The suite covers key migration, credential response shaping, MCP version
 negotiation, notification handling, a full client handshake,
-verified low-risk execution, maker-checker separation, argument-bound leases,
-lease replay, manifest quarantine, DLP blocking, sandbox-path rejection before
+verified low-risk execution, maker-checker separation, maker-only lease claims,
+platform-admin execution separation, argument-bound leases, lease replay,
+attack-lab replicas that fail when controls are disabled, manifest quarantine, DLP blocking, sandbox-path rejection before
 approval, audited execution failures, encoded-IPv4 SSRF destinations, tenant
 isolation, Origin validation, strict request schemas, evidence integrity,
 single-source versioning, and dashboard headers.

@@ -295,49 +295,61 @@ class SQLiteRepository:
             POLICIES,
         )
         for definition in TOOL_DEFINITIONS:
-            payload = manifest_payload(
-                mcp_server_id=definition["mcp_server_id"],
-                name=definition["name"],
-                description=definition["description"],
-                required_scope=definition["required_scope"],
-                risk_level=definition["risk_level"],
-                input_schema=definition["input_schema"],
-                annotations=definition["annotations"],
-            )
-            connection.execute(
-                """
-                insert into tool_manifests (
-                    id, organization_id, mcp_server_id, name, description,
-                    required_scope, risk_level, input_schema, annotations,
-                    manifest_digest, trust_status, verified_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                on conflict(id) do update set
-                    organization_id = excluded.organization_id,
-                    mcp_server_id = excluded.mcp_server_id,
-                    name = excluded.name,
-                    description = excluded.description,
-                    required_scope = excluded.required_scope,
-                    risk_level = excluded.risk_level,
-                    input_schema = excluded.input_schema,
-                    annotations = excluded.annotations,
-                    manifest_digest = excluded.manifest_digest,
-                    verified_at = excluded.verified_at
-                """,
-                (
-                    definition["id"],
-                    definition["organization_id"],
-                    definition["mcp_server_id"],
-                    definition["name"],
-                    definition["description"],
-                    definition["required_scope"],
-                    definition["risk_level"],
-                    canonical_json(definition["input_schema"]),
-                    canonical_json(definition["annotations"]),
-                    compute_manifest_digest(payload),
-                    "verified",
-                    utc_now_iso(),
-                ),
-            )
+            self._upsert_tool(connection, definition)
+
+    @staticmethod
+    def _upsert_tool(connection: sqlite3.Connection, definition: dict[str, Any]) -> None:
+        payload = manifest_payload(
+            mcp_server_id=definition["mcp_server_id"],
+            name=definition["name"],
+            description=definition["description"],
+            required_scope=definition["required_scope"],
+            risk_level=definition["risk_level"],
+            input_schema=definition["input_schema"],
+            annotations=definition["annotations"],
+        )
+        connection.execute(
+            """
+            insert into tool_manifests (
+                id, organization_id, mcp_server_id, name, description,
+                required_scope, risk_level, input_schema, annotations,
+                manifest_digest, trust_status, verified_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(id) do update set
+                organization_id = excluded.organization_id,
+                mcp_server_id = excluded.mcp_server_id,
+                name = excluded.name,
+                description = excluded.description,
+                required_scope = excluded.required_scope,
+                risk_level = excluded.risk_level,
+                input_schema = excluded.input_schema,
+                annotations = excluded.annotations,
+                manifest_digest = excluded.manifest_digest,
+                verified_at = excluded.verified_at
+            """,
+            (
+                definition["id"],
+                definition["organization_id"],
+                definition["mcp_server_id"],
+                definition["name"],
+                definition["description"],
+                definition["required_scope"],
+                definition["risk_level"],
+                canonical_json(definition["input_schema"]),
+                canonical_json(definition["annotations"]),
+                compute_manifest_digest(payload),
+                "verified",
+                utc_now_iso(),
+            ),
+        )
+
+    def register_tool_definition(self, definition: dict[str, Any]) -> ToolManifest:
+        with self._connect() as connection:
+            self._upsert_tool(connection, definition)
+        tool = self.get_tool(definition["organization_id"], definition["id"])
+        if not tool:
+            raise ValueError(f"Unknown tool manifest '{definition['id']}'.")
+        return tool
 
     def _fetch_one(self, query: str, params: tuple[Any, ...]) -> sqlite3.Row | None:
         with self._connect() as connection:
@@ -353,6 +365,10 @@ class SQLiteRepository:
 
     def get_user_by_api_key_hash(self, api_key_hash: str) -> User | None:
         row = self._fetch_one("select * from users where api_key_hash = ?", (api_key_hash,))
+        return self._model(User, row) if row else None
+
+    def get_user(self, user_id: str) -> User | None:
+        row = self._fetch_one("select * from users where id = ?", (user_id,))
         return self._model(User, row) if row else None
 
     def list_servers(self, organization_id: str) -> list[MCPServer]:
@@ -570,8 +586,15 @@ class SQLiteRepository:
             raise ValueError(f"Unknown approval '{approval_id}'.")
         return approval
 
-    def save_lease(self, lease: CapabilityLease) -> CapabilityLease:
+    def issue_lease_once(self, lease: CapabilityLease) -> CapabilityLease:
         with self._connect() as connection:
+            connection.execute("begin immediate")
+            existing = connection.execute(
+                "select 1 from capability_leases where organization_id = ? and request_id = ?",
+                (lease.organization_id, lease.request_id),
+            ).fetchone()
+            if existing:
+                raise PermissionError("Capability lease has already been claimed.")
             connection.execute(
                 """
                 insert into capability_leases (

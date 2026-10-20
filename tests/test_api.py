@@ -12,7 +12,7 @@ from mcp_security_gateway import __version__
 from mcp_security_gateway.main import create_app
 from mcp_security_gateway.repository import SQLiteRepository
 from mcp_security_gateway.security import hash_secret, is_forbidden_destination
-from mcp_security_gateway.services import ControlledToolExecutor
+from mcp_security_gateway.services import ControlledToolExecutor, GatewayService
 from mcp_security_gateway.state import InMemoryRateLimitStore
 
 
@@ -47,6 +47,14 @@ def create_pending_request(client: TestClient) -> tuple[str, str, dict[str, str]
     assert response.status_code == 201
     approval = client.get("/approvals", headers=OPERATOR).json()[0]
     return response.json()["id"], approval["id"], arguments
+
+
+def approve_and_claim(client: TestClient, request_id: str, approval_id: str) -> str:
+    decision = client.post(f"/approvals/{approval_id}/decision", headers=SECURITY, json={"decision": "approved"})
+    assert decision.status_code == 200
+    claim = client.post(f"/requests/{request_id}/lease", headers=OPERATOR)
+    assert claim.status_code == 200
+    return claim.json()["capability_lease"]
 
 
 def test_health_reports_digest_only_api_key_storage(tmp_path: Path) -> None:
@@ -199,14 +207,7 @@ def test_operator_cannot_self_approve(tmp_path: Path) -> None:
 def test_approval_issues_one_time_argument_bound_lease(tmp_path: Path) -> None:
     client, _, _ = make_client(tmp_path)
     request_id, approval_id, arguments = create_pending_request(client)
-    decision = client.post(
-        f"/approvals/{approval_id}/decision",
-        headers=SECURITY,
-        json={"decision": "approved"},
-    )
-    assert decision.status_code == 200
-    lease = decision.json()["capability_lease"]
-    assert lease
+    lease = approve_and_claim(client, request_id, approval_id)
 
     tampered = client.post(
         f"/requests/{request_id}/execute",
@@ -326,6 +327,76 @@ def test_attack_lab_passes_all_controls(tmp_path: Path) -> None:
     response = client.post("/attack-lab/run", headers=SECURITY)
     assert response.status_code == 200
     assert response.json()["passed"] == response.json()["total"] == 5
+
+
+def test_attack_lab_replays_attacks_without_touching_the_live_tenant(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    before = client.get("/health").json()
+    cases = {item["id"]: item for item in client.post("/attack-lab/run", headers=SECURITY).json()["cases"]}
+    after = client.get("/health").json()
+    assert "Arguments changed after approval" in cases["approval-tamper"]["evidence"]
+    assert "trust state" in cases["manifest-drift"]["evidence"]
+    assert "decimal-encoded" in cases["ssrf-metadata"]["evidence"]
+    for counter in ("requests", "pending_approvals", "incidents", "executions", "tools"):
+        assert after[counter] == before[counter]
+
+
+def test_attack_lab_fails_when_argument_dlp_is_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _, _ = make_client(tmp_path)
+    monkeypatch.setattr("mcp_security_gateway.services.security_findings", lambda arguments: [])
+    cases = {item["id"]: item for item in client.post("/attack-lab/run", headers=SECURITY).json()["cases"]}
+    assert cases["secret-exfiltration"]["passed"] is False
+    assert cases["ssrf-metadata"]["passed"] is False
+    assert cases["manifest-drift"]["passed"] is True
+
+
+def test_attack_lab_fails_when_execution_binding_is_bypassed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _, _ = make_client(tmp_path)
+    monkeypatch.setattr(GatewayService, "_validate_execution_binding", lambda self, auth, request, arguments: None)
+    cases = {item["id"]: item for item in client.post("/attack-lab/run", headers=SECURITY).json()["cases"]}
+    assert cases["approval-tamper"]["observed"] == "executed"
+    assert cases["approval-tamper"]["passed"] is False
+
+
+def test_approval_decision_returns_no_capability_to_the_checker(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, _ = create_pending_request(client)
+    decision = client.post(f"/approvals/{approval_id}/decision", headers=SECURITY, json={"decision": "approved"})
+    assert set(decision.json()) == {"approval"}
+    assert client.get(f"/requests/{request_id}", headers=OPERATOR).json()["execution_status"] == "lease_ready"
+    assert client.post(f"/requests/{request_id}/lease", headers=SECURITY).status_code == 403
+    assert client.post(f"/requests/{request_id}/lease", headers=PLATFORM).status_code == 403
+
+
+def test_lease_is_claimable_only_after_approval_and_only_once(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, _ = create_pending_request(client)
+    early = client.post(f"/requests/{request_id}/lease", headers=OPERATOR)
+    assert early.status_code == 403
+    approve_and_claim(client, request_id, approval_id)
+    second = client.post(f"/requests/{request_id}/lease", headers=OPERATOR)
+    assert second.status_code == 403
+    events = client.get(f"/requests/{request_id}/evidence", headers=OPERATOR).json()["audit_events"]
+    assert [event["event_type"] for event in events][-1] == "lease_claimed"
+
+
+def test_platform_admin_cannot_execute_another_workloads_request(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, arguments = create_pending_request(client)
+    lease = approve_and_claim(client, request_id, approval_id)
+    hijack = client.post(
+        f"/requests/{request_id}/execute",
+        headers=PLATFORM,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert hijack.status_code == 403
+    assert "requesting workload" in hijack.json()["detail"]
+    owner = client.post(
+        f"/requests/{request_id}/execute",
+        headers=OPERATOR,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert owner.status_code == 200
 
 
 def test_rate_limit_store_does_not_retain_raw_api_key(tmp_path: Path) -> None:
@@ -537,11 +608,7 @@ def test_unsafe_sandbox_write_over_mcp_is_denied_without_approval(tmp_path: Path
 def test_failed_execution_is_recorded_and_audited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     client, _, _ = make_client(tmp_path)
     request_id, approval_id, arguments = create_pending_request(client)
-    lease = client.post(
-        f"/approvals/{approval_id}/decision",
-        headers=SECURITY,
-        json={"decision": "approved"},
-    ).json()["capability_lease"]
+    lease = approve_and_claim(client, request_id, approval_id)
 
     def refuse(self: ControlledToolExecutor, tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
         raise PermissionError("Sandbox storage is unavailable.")

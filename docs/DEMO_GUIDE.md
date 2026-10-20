@@ -41,12 +41,14 @@ Switch to:
 msg-security-demo
 ```
 
-Approve the pending write. Explain that approval returns a short-lived one-time
-lease bound to the exact request and argument digest. The gateway stores only
-the lease hash.
+Approve the pending write. Explain that approval hands the checker no
+credential: the request only becomes `lease ready`.
 
-Switch back to the operator and execute the lease. If an argument changes, the
-lease is rejected before it is consumed.
+Switch back to the operator and select **Claim & execute**. Only the maker can
+claim the short-lived one-time lease, which is bound to the exact request and
+argument digest; the gateway stores only its hash. If an argument changes, the
+lease is rejected before it is consumed, and not even a platform administrator
+can execute it on the maker's behalf.
 
 ## 5. Demonstrate Tool Rug-pull Detection
 
@@ -60,7 +62,9 @@ Explain:
 
 ## 6. Run Attack Lab
 
-Run the security suite and show the five passing controls:
+Run the security suite and show the five passing controls. Each attack is
+replayed through the real gateway flow on an isolated replica, so the evidence
+shown is the gateway's own rejection message:
 
 - manifest drift;
 - approval argument tamper;

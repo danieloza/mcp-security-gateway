@@ -93,10 +93,15 @@ A high-risk decision stores:
 - governed-request digest;
 - maker identity.
 
-The checker cannot be the maker. Approval generates a random token, while only
-its digest is persisted. The capability lease is:
+The checker cannot be the maker. Approval marks the request `lease_ready` but
+returns no credential. The maker then claims a random token through
+`POST /requests/{request_id}/lease`; only its digest is persisted. The
+capability lease is:
 
-- valid for a short configured TTL;
+- claimable once, and only by the requesting workload;
+- executable only by the requesting workload, with no platform-administrator
+  override;
+- valid for a short configured TTL that starts at the claim;
 - usable once;
 - tenant and request bound;
 - consumed atomically;
