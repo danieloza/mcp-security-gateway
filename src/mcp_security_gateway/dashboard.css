@@ -609,6 +609,10 @@ tbody tr:hover {
   text-align: center;
 }
 
+.actions-cell {
+  white-space: nowrap;
+}
+
 .cell-reason {
   max-width: 240px;
   line-height: 1.4;

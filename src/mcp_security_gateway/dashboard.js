@@ -200,6 +200,7 @@ function renderRequests() {
     );
 
     const actionsCell = document.createElement("td");
+    actionsCell.className = "actions-cell";
     const isExpanded = state.expanded.has(request.id);
     const whyButton = textElement("button", isExpanded ? "Hide why" : "Why", "button button-secondary button-small");
     whyButton.type = "button";
