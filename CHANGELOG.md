@@ -2,7 +2,15 @@
 
 Significant changes to the MCP Security Gateway are documented here.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-20
+
+### Breaking change
+
+- `POST /approvals/{approval_id}/decision` no longer returns
+  `capability_lease` or `expires_at`. After approval the request is
+  `lease_ready`, and the maker claims the one-time lease with
+  `POST /requests/{request_id}/lease`, then executes as before. Integrations
+  that read the lease from the approval response must switch to the claim call.
 
 ### Security fixes
 
