@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+from importlib.metadata import version
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+from mcp_security_gateway import __version__
 from mcp_security_gateway.main import create_app
 from mcp_security_gateway.repository import SQLiteRepository
-from mcp_security_gateway.security import hash_secret
+from mcp_security_gateway.security import hash_secret, is_forbidden_destination
+from mcp_security_gateway.services import ControlledToolExecutor
 from mcp_security_gateway.state import InMemoryRateLimitStore
 
 
@@ -373,6 +378,131 @@ def test_schema_rejects_unexpected_request_fields(tmp_path: Path) -> None:
         json={**request_payload(), "force_allow": True},
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../../etc/passwd.md",
+        "docs/../../escape.md",
+        "docs\\..\\..\\escape.md",
+        "/etc/review.md",
+        "C:/Windows/review.md",
+        "docs/review.md:hidden",
+        "docs/deploy.sh",
+    ],
+)
+def test_unsafe_sandbox_write_is_blocked_before_approval(tmp_path: Path, path: str) -> None:
+    client, _, _ = make_client(tmp_path)
+    response = client.post(
+        "/requests",
+        headers=OPERATOR,
+        json=request_payload(arguments={"path": path, "content": "approved evidence"}),
+    )
+    assert response.status_code == 201
+    assert response.json()["status"] == "blocked"
+    assert response.json()["policy_id"] == "pol_hard_block"
+    trace = {item["control"]: item["result"] for item in json.loads(response.json()["policy_trace"])}
+    assert trace["adapter_preflight"] == "failed"
+    assert client.get("/approvals", headers=OPERATOR).json() == []
+    assert client.get("/incidents", headers=OPERATOR).json()[0]["severity"] == "high"
+
+
+def test_unsafe_sandbox_write_over_mcp_is_denied_without_approval(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    response = client.post(
+        "/mcp",
+        headers={**OPERATOR, "Mcp-Method": "tools/call", "Mcp-Name": "repo.write_file"},
+        json={
+            "jsonrpc": "2.0",
+            "id": "escape-1",
+            "method": "tools/call",
+            "params": {
+                "name": "repo.write_file",
+                "arguments": {"path": "../outside.md", "content": "approved evidence"},
+            },
+        },
+    )
+    result = response.json()["result"]
+    assert result["isError"] is True
+    assert result["structuredContent"]["status"] == "denied"
+    assert "adapter would refuse" in result["structuredContent"]["reason"]
+
+
+def test_failed_execution_is_recorded_and_audited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, _, _ = make_client(tmp_path)
+    request_id, approval_id, arguments = create_pending_request(client)
+    lease = client.post(
+        f"/approvals/{approval_id}/decision",
+        headers=SECURITY,
+        json={"decision": "approved"},
+    ).json()["capability_lease"]
+
+    def refuse(self: ControlledToolExecutor, tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
+        raise PermissionError("Sandbox storage is unavailable.")
+
+    monkeypatch.setattr(ControlledToolExecutor, "execute", refuse)
+    failed = client.post(
+        f"/requests/{request_id}/execute",
+        headers=OPERATOR,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert failed.status_code == 403
+
+    request = client.get(f"/requests/{request_id}", headers=OPERATOR).json()
+    assert request["status"] == "failed"
+    assert request["execution_status"] == "failed"
+    evidence = client.get(f"/requests/{request_id}/evidence", headers=OPERATOR).json()
+    assert evidence["chain_valid"] is True
+    assert evidence["executions"][0]["status"] == "failed"
+    assert "Sandbox storage is unavailable." in evidence["executions"][0]["result_json"]
+    assert [event["event_type"] for event in evidence["audit_events"]][-1] == "tool_execution_failed"
+
+    monkeypatch.undo()
+    retry = client.post(
+        f"/requests/{request_id}/execute",
+        headers=OPERATOR,
+        json={"arguments": arguments, "capability_lease": lease},
+    )
+    assert retry.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://2130706433/",
+        "http://0x7f000001/",
+        "http://017700000001/",
+        "http://127.1/",
+        "http://0x7f.0.0.1/",
+        "http://2852039166/latest/meta-data",
+        "http://100.100.100.200/latest/meta-data",
+        "http://256.1.1.1/",
+        "http://1.2.3.4.5/",
+    ],
+)
+def test_forbidden_destination_rejects_encoded_internal_ipv4(url: str) -> None:
+    assert is_forbidden_destination(url) is True
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https://example.com/hook", "http://8.8.8.8/", "http://134744072/", "https://api.v2/"],
+)
+def test_forbidden_destination_allows_public_hosts(url: str) -> None:
+    assert is_forbidden_destination(url) is False
+
+
+def test_version_has_a_single_source(tmp_path: Path) -> None:
+    client, _, _ = make_client(tmp_path)
+    initialize = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
+    assert version("mcp-security-gateway") == __version__
+    assert client.app.version == __version__
+    assert initialize.json()["result"]["serverInfo"]["version"] == __version__
 
 
 def test_dashboard_has_security_headers_and_external_assets(tmp_path: Path) -> None:

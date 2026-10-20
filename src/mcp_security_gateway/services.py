@@ -55,6 +55,21 @@ class LeaseGrant:
     expires_at: str
 
 
+SANDBOX_WRITE_SUFFIXES = frozenset({".md", ".txt", ".json", ".yml", ".yaml"})
+
+
+def sandbox_write_violation(raw_path: str) -> str | None:
+    """Return why a sandbox write path is unsafe, or None when it stays inside the sandbox."""
+    if "\x00" in raw_path or ":" in raw_path:
+        return "path contains a drive, stream, or null character"
+    path = PurePosixPath(raw_path.replace("\\", "/"))
+    if path.is_absolute() or ".." in path.parts:
+        return "path traverses outside the sandbox"
+    if path.suffix.lower() not in SANDBOX_WRITE_SUFFIXES:
+        return "file type is not allowlisted"
+    return None
+
+
 class ControlledToolExecutor:
     """Fixed local adapter used to prove post-policy execution without arbitrary egress."""
 
@@ -73,7 +88,17 @@ class ControlledToolExecutor:
         },
     )
 
+    def preflight(self, tool_name: str, arguments: dict[str, Any]) -> str | None:
+        """Return why the adapter would refuse these arguments, so policy can reject them before approval."""
+        if tool_name == "repo.write_file":
+            return sandbox_write_violation(str(arguments["path"]))
+        return None
+
     def execute(self, tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        violation = self.preflight(tool_name, arguments)
+        if violation:
+            raise PermissionError(f"Controlled adapter refused the call: {violation}.")
+
         if tool_name == "kb.search":
             query = str(arguments["query"]).lower()
             tokens = {part for part in query.replace("-", " ").split() if len(part) > 2}
@@ -91,10 +116,6 @@ class ControlledToolExecutor:
 
         if tool_name == "repo.write_file":
             path = PurePosixPath(str(arguments["path"]).replace("\\", "/"))
-            if path.is_absolute() or ".." in path.parts:
-                raise PermissionError("Sandbox path traversal was blocked.")
-            if path.suffix.lower() not in {".md", ".txt", ".json", ".yml", ".yaml"}:
-                raise PermissionError("Sandbox write type is not allowlisted.")
             content = str(arguments["content"])
             return {
                 "mode": "isolated_portfolio_sandbox",
@@ -206,6 +227,7 @@ class GatewayService:
         allowed_scopes = {item.strip() for item in server.allowed_scopes.split(",")}
         rate = self.rate_limits.increment(f"{organization_id}:{auth.user.id}")
         findings = security_findings(arguments)
+        adapter_violation = self.executor.preflight(manifest.name, arguments)
         trace.extend(
             (
                 {
@@ -222,6 +244,11 @@ class GatewayService:
                     "control": "argument_dlp",
                     "result": "passed" if not findings else "failed",
                     "evidence": [item["type"] for item in findings],
+                },
+                {
+                    "control": "adapter_preflight",
+                    "result": "passed" if not adapter_violation else "failed",
+                    "evidence": adapter_violation or "accepted",
                 },
             )
         )
@@ -261,6 +288,13 @@ class GatewayService:
             risk_reason = "sensitive or forbidden argument content was detected"
             incident_severity = "critical"
             incident_summary = "Potential secret exfiltration or forbidden destination was blocked."
+        elif adapter_violation:
+            policy_id = "pol_hard_block"
+            status = "blocked"
+            execution_status = "not_executed"
+            risk_reason = f"controlled adapter would refuse the arguments: {adapter_violation}"
+            incident_severity = "high"
+            incident_summary = "Sandbox escape or disallowed write was blocked before approval."
         elif server.environment == "production" and requested_scope == "ops:admin":
             policy_id = "pol_hard_block"
             status = "blocked"
@@ -701,42 +735,68 @@ class GatewayService:
         arguments: dict[str, Any],
     ) -> ExecutionRecord:
         self._validate_execution_binding(auth, request, arguments)
-        if request.execution_status == "executed":
+        if request.execution_status in {"executed", "failed"}:
             raise PermissionError("Request has already been executed.")
         started = perf_counter()
-        result = self.executor.execute(request.tool_name, arguments)
+        try:
+            result = self.executor.execute(request.tool_name, arguments)
+        except Exception as exc:
+            # The lease may already be consumed, so the failure must be as visible as a success.
+            self._record_execution(
+                auth,
+                request,
+                status="failed",
+                result={"error_type": type(exc).__name__, "reason": str(exc)},
+                started=started,
+            )
+            raise
+        return self._record_execution(auth, request, status="succeeded", result=result, started=started)
+
+    def _record_execution(
+        self,
+        auth: AuthContext,
+        request: GatewayRequest,
+        *,
+        status: str,
+        result: dict[str, Any],
+        started: float,
+    ) -> ExecutionRecord:
         latency_ms = max(0, round((perf_counter() - started) * 1000))
         redacted_result = redact_value(result)
-        result_json = canonical_json(redacted_result)
         execution = ExecutionRecord(
             id=new_id("exec"),
             request_id=request.id,
             organization_id=request.organization_id,
             tool_name=request.tool_name,
-            status="succeeded",
-            result_json=result_json,
+            status=status,
+            result_json=canonical_json(redacted_result),
             result_digest=digest_json(redacted_result),
             latency_ms=latency_ms,
             created_at=utc_now_iso(),
         )
+        succeeded = status == "succeeded"
         self.repo.save_execution(execution)
         self.repo.update_request_status(
             request.organization_id,
             request.id,
-            status="executed",
-            execution_status="executed",
+            status="executed" if succeeded else "failed",
+            execution_status="executed" if succeeded else "failed",
         )
+        payload: dict[str, Any] = {
+            "execution_id": execution.id,
+            "tool_name": execution.tool_name,
+            "result_digest": execution.result_digest,
+            "latency_ms": execution.latency_ms,
+        }
+        if not succeeded:
+            payload["error_type"] = redacted_result["error_type"]
+            payload["reason"] = redacted_result["reason"]
         self._audit(
             organization_id=request.organization_id,
-            event_type="tool_executed",
+            event_type="tool_executed" if succeeded else "tool_execution_failed",
             subject_id=request.id,
             actor_id=auth.user.id,
-            payload={
-                "execution_id": execution.id,
-                "tool_name": execution.tool_name,
-                "result_digest": execution.result_digest,
-                "latency_ms": execution.latency_ms,
-            },
+            payload=payload,
         )
         return execution
 

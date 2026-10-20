@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-20_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-43_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
@@ -287,8 +287,10 @@ docker compose config --quiet
 
 The suite covers key migration, credential response shaping, MCP negotiation,
 verified low-risk execution, maker-checker separation, argument-bound leases,
-lease replay, manifest quarantine, DLP blocking, tenant isolation, Origin
-validation, strict request schemas, evidence integrity, and dashboard headers.
+lease replay, manifest quarantine, DLP blocking, sandbox-path rejection before
+approval, audited execution failures, encoded-IPv4 SSRF destinations, tenant
+isolation, Origin validation, strict request schemas, evidence integrity,
+single-source versioning, and dashboard headers.
 
 ## Production-shaped, Not Production-ready
 

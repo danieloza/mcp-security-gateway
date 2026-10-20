@@ -8,6 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from mcp_security_gateway import __version__
 from mcp_security_gateway.config import (
     allowed_hosts,
     allowed_origins,
@@ -126,7 +127,7 @@ def create_app(
     openapi_url = None if is_production() else "/openapi.json"
     app = FastAPI(
         title="MCP Security Gateway",
-        version="0.2.0",
+        version=__version__,
         docs_url=docs_url,
         redoc_url=None,
         openapi_url=openapi_url,
@@ -396,7 +397,7 @@ def create_app(
                     "capabilities": {"tools": {"listChanged": True}},
                     "serverInfo": {
                         "name": "mcp-security-gateway",
-                        "version": "0.2.0",
+                        "version": __version__,
                     },
                     "instructions": (
                         "All tool calls are manifest-pinned, policy evaluated, "

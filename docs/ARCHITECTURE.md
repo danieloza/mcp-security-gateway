@@ -62,13 +62,19 @@ supported.
 4. Validate arguments against the stored JSON schema.
 5. Apply fixed-window caller rate limits.
 6. Detect secret-bearing values and forbidden network destinations.
-7. Verify requested scope, server environment, and manifest trust state.
-8. Select a versioned policy:
+7. Ask the execution adapter to preflight the arguments, so a call it would
+   refuse (for example a sandbox path traversal) is blocked before approval.
+8. Verify requested scope, server environment, and manifest trust state.
+9. Select a versioned policy:
    - `pol_default_allow`;
    - `pol_approval_gate`;
    - `pol_hard_block`.
-9. Persist the redacted arguments, digests, policy trace, and decision.
-10. Execute, hold for approval, or create an incident.
+10. Persist the redacted arguments, digests, policy trace, and decision.
+11. Execute, hold for approval, or create an incident.
+
+If the adapter still fails after a lease is consumed, the gateway records a
+`failed` execution and a `tool_execution_failed` audit event, and the request
+cannot be retried with the spent lease.
 
 ## Approval and Execution Binding
 

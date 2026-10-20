@@ -2,6 +2,24 @@
 
 Significant changes to the MCP Security Gateway are documented here.
 
+## [Unreleased]
+
+### Security fixes
+
+- reject unsafe `repo.write_file` paths (traversal, absolute, drive, NTFS
+  stream, non-allowlisted type) during policy evaluation, before approval and
+  lease issuance; the adapter repeats the same check before execution;
+- record adapter failures as `failed` executions with an HMAC-chained
+  `tool_execution_failed` event instead of leaving the request in
+  `lease_issued` with no evidence;
+- flag decimal, hex, octal, and shortened IPv4 literals (for example
+  `http://2130706433/`) and other non-global addresses such as
+  `100.100.100.200` as forbidden destinations; malformed numeric hosts fail
+  closed;
+- read the package, API, and MCP `serverInfo` version from a single
+  `__version__` source;
+- expanded the test suite from 20 to 43 tests.
+
 ## [0.2.1] - 2026-07-24
 
 ### Commercial project showcase

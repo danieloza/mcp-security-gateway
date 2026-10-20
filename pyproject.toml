@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-security-gateway"
-version = "0.2.1"
+dynamic = ["version"]
 description = "Protocol-aware MCP runtime firewall with verified execution, approvals, and tamper-evident evidence."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,6 +36,9 @@ dev = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+version = { attr = "mcp_security_gateway.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

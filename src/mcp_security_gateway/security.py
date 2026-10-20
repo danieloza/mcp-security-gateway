@@ -22,6 +22,8 @@ SECRET_VALUE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 URL_KEY_PATTERN = re.compile(r"(?:^|[_-])(url|uri|endpoint|callback|webhook)(?:$|[_-])", re.IGNORECASE)
+# One component of a legacy inet_aton host: decimal, 0x-prefixed hex, or 0-prefixed octal.
+IPV4_PART_PATTERN = re.compile(r"0x[0-9a-f]*|0[0-7]*|[1-9][0-9]*", re.IGNORECASE)
 
 
 def utc_now() -> datetime:
@@ -170,12 +172,20 @@ def is_forbidden_destination(value: str) -> bool:
     hostname = parsed.hostname.rstrip(".").lower()
     if hostname in {"localhost", "metadata.google.internal"} or hostname.endswith(".local"):
         return True
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address | None
     try:
         address = ipaddress.ip_address(hostname)
     except ValueError:
-        return False
+        if not IPV4_PART_PATTERN.fullmatch(hostname.rsplit(".", 1)[-1]):
+            return False
+        # A numeric final label makes the host an IPv4 literal for browsers and curl;
+        # if it is not a valid one, fail closed instead of treating it as a DNS name.
+        address = parse_legacy_ipv4(hostname)
+        if address is None:
+            return True
     return any(
         (
+            not address.is_global,
             address.is_private,
             address.is_loopback,
             address.is_link_local,
@@ -184,3 +194,26 @@ def is_forbidden_destination(value: str) -> bool:
             address.is_unspecified,
         )
     )
+
+
+def parse_legacy_ipv4(hostname: str) -> ipaddress.IPv4Address | None:
+    """Parse inet_aton forms such as 2130706433, 0x7f000001, 017700000001, or 127.1."""
+    parts = hostname.split(".")
+    if not 1 <= len(parts) <= 4 or not all(IPV4_PART_PATTERN.fullmatch(part) for part in parts):
+        return None
+    numbers = []
+    for part in parts:
+        if part[:2].lower() == "0x":
+            numbers.append(int(part[2:] or "0", 16))
+        elif len(part) > 1 and part.startswith("0"):
+            numbers.append(int(part[1:], 8))
+        else:
+            numbers.append(int(part, 10))
+    *leading, last = numbers
+    # Leading parts are single octets; the last part fills every remaining byte.
+    if any(value > 255 for value in leading) or last >= 256 ** (5 - len(numbers)):
+        return None
+    value = last
+    for index, octet in enumerate(leading):
+        value |= octet << (8 * (3 - index))
+    return ipaddress.IPv4Address(value)
