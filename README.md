@@ -450,14 +450,6 @@ See [Threat Model](docs/THREAT_MODEL.md) and
 - case study: [docs/CASE_STUDY.md](docs/CASE_STUDY.md)
 - patch notes: [CHANGELOG.md](CHANGELOG.md)
 
-## Interview Framing
-
-> I built a protocol-aware MCP enforcement point rather than trusting the agent
-> or the tool server. Every call is tied to workload identity, a pinned tool
-> manifest, versioned policy, and an exact argument digest. Risky calls receive a
-> one-time approval lease, while manifest drift, secret egress, scope escalation,
-> and production operations are contained before execution.
-
 ## Related Project
 
 [Regulated AI Agent Platform](https://github.com/danieloza/regulated-ai-agent-platform)
