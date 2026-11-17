@@ -351,6 +351,42 @@ class SQLiteRepository:
             raise ValueError(f"Unknown tool manifest '{definition['id']}'.")
         return tool
 
+    def register_server(self, server: MCPServer) -> MCPServer:
+        """Create or refresh a configured upstream server. Its trust state is kept."""
+        with self._connect() as connection:
+            connection.execute(
+                """
+                insert into mcp_servers (
+                    id, organization_id, name, environment, sensitivity, allowed_scopes, trust_status
+                ) values (?, ?, ?, ?, ?, ?, ?)
+                on conflict(id) do update set
+                    name = excluded.name,
+                    environment = excluded.environment,
+                    sensitivity = excluded.sensitivity,
+                    allowed_scopes = excluded.allowed_scopes
+                """,
+                (
+                    server.id,
+                    server.organization_id,
+                    server.name,
+                    server.environment,
+                    server.sensitivity,
+                    server.allowed_scopes,
+                    server.trust_status,
+                ),
+            )
+        stored = self.get_server(server.organization_id, server.id)
+        if not stored:
+            raise ValueError(f"Unknown MCP server '{server.id}'.")
+        return stored
+
+    def list_server_tools(self, organization_id: str, server_id: str) -> list[ToolManifest]:
+        rows = self._fetch_all(
+            "select * from tool_manifests where organization_id = ? and mcp_server_id = ? order by name",
+            (organization_id, server_id),
+        )
+        return [self._model(ToolManifest, row) for row in rows]
+
     def _fetch_one(self, query: str, params: tuple[Any, ...]) -> sqlite3.Row | None:
         with self._connect() as connection:
             return connection.execute(query, params).fetchone()
