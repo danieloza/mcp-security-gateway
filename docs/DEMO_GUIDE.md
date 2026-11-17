@@ -93,9 +93,40 @@ Show:
 - verified chain status;
 - final evidence-pack digest.
 
+## 8. Optional: A Poisoned Server Behind the Gateway
+
+This act needs two extra processes, started before the demo:
+
+```powershell
+python examples/poisoned_server.py
+$env:MSG_UPSTREAMS = "examples/upstreams.json"
+python -m uvicorn mcp_security_gateway.main:app --port 8000
+```
+
+As the security administrator, in **Tool trust**, select **Sync upstream**. The
+server's two tools are pinned as `notes.search_notes` and `notes.export_notes`.
+
+Make the server swap its description, then sync again:
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8100/rugpull
+```
+
+Show the quarantined tool, with the pinned description next to the served one
+and the hidden text decoded.
+
+Explain:
+
+> Nothing in the new description is visible to a person reading it in a
+> client. The instructions sit in invisible Unicode tag characters. The gateway
+> compares every call against what was reviewed, so the agent never sees the
+> new text. A call made before this sync is already refused.
+
+`POST http://127.0.0.1:8100/reset` restores the server for the next run.
+
 ## Closing Narrative
 
-> The gateway does not trust the agent, the tool description, or a previous
-> approval. It verifies identity, a pinned manifest, current policy, and the
+> The gateway does not trust the agent, the tool description, an upstream
+> server, or a previous approval. It verifies identity, a pinned manifest, current policy, and the
 > exact arguments immediately before execution, then produces evidence of what
 > actually happened.

@@ -11,7 +11,7 @@
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
-[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
+[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [Proxy Mode](#proxy-mode-real-mcp-servers-behind-the-gateway) · [OAuth](#oauth-resource-server-mode) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
 ![MCP Security Gateway module launcher with live status for each module](docs/assets/gateway-dashboard.png)
 
@@ -20,19 +20,24 @@
 Agents can discover powerful MCP tools, but discovery is not authorization. A
 production control point must determine:
 
-- which workload and tenant initiated the call;
+- which workload and tenant initiated the call, and whether its token was
+  issued for this gateway;
 - whether the server, tool description, and JSON schema still match an approved
-  manifest;
+  manifest, at review time and at the moment of the call;
 - whether the requested scope and arguments fit policy;
 - whether secrets or forbidden destinations appear in the call;
 - whether a human must approve the exact payload;
 - whether the approved call was modified, replayed, or executed twice;
+- whether the tool's output is trying to instruct the agent;
 - what evidence proves the final outcome.
 
-MCP Security Gateway places that control point between an MCP client and a fixed
-tool execution adapter. It supports protocol-level `initialize`, `ping`,
-`tools/list`, and `tools/call`, then applies deterministic controls before any
-side effect.
+MCP Security Gateway places that control point between an MCP client and the
+tools it calls: a fixed built-in execution adapter, or real MCP servers behind
+the gateway in [proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway). It supports
+protocol-level `initialize`, `ping`, `tools/list`, and `tools/call`, then
+applies deterministic controls before any side effect. Callers authenticate
+with public demo keys or, in [OAuth mode](#oauth-resource-server-mode), with access tokens from an
+external authorization server.
 
 ## Product Demo
 
@@ -62,12 +67,16 @@ flowchart LR
   Transport --> Identity["Workload identity"]
   Identity --> Manifest["Pinned tool manifest"]
   Manifest --> Policy["Scope + DLP + rate + environment policy"]
-  Policy -->|low risk| Execute["Controlled execution adapter"]
+  Policy -->|low risk| Execute["Execution"]
   Policy -->|high risk| Approval["Maker-checker approval"]
   Approval --> Lease["One-time capability lease"]
   Lease --> Execute
   Policy -->|deny| Incident["Incident"]
-  Execute --> Evidence["HMAC-chained evidence"]
+  Execute --> Adapter["Built-in adapter"]
+  Execute -->|pin re-checked| Upstream["Upstream MCP server"]
+  Upstream --> Inspect["Output inspection"]
+  Adapter --> Evidence["HMAC-chained evidence"]
+  Inspect --> Evidence
 ```
 
 Every governed request records:
@@ -92,7 +101,8 @@ Every governed request records:
 
 The values in [Demo credentials](#demo-credentials) are intentionally public
 portfolio credentials, not secrets. They exist only to make the local walkthrough
-repeatable.
+repeatable. In [OAuth mode](#oauth-resource-server-mode) they are refused, and callers present
+audience-bound access tokens instead. Production mode requires OAuth mode.
 
 ### Tool Manifest Trust
 
@@ -103,6 +113,12 @@ must explicitly restore its trust state.
 
 MCP tool annotations are retained for interoperability and operator context, but
 the gateway does not treat server-provided hints as authorization.
+
+For upstream servers in [proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway), the gateway
+also re-reads each tool's definition on every call and again just before
+forwarding, quarantines a new tool whose definition already carries hidden
+instructions, and withholds tool output that reads like instructions to the
+agent.
 
 ### Approval-bound capability leases
 
@@ -149,7 +165,8 @@ The modules provide:
 
 - live MCP policy and execution traffic, with the decision reason on every row
   and an expandable trace of each policy control;
-- tool trust registry with manifest fingerprints;
+- tool trust registry with manifest fingerprints, and **Sync upstream** with
+  the pinned and served descriptions side by side;
 - maker-checker approval workbench that shows the tool, justification, and
   redacted payload being approved;
 - maker-only lease claim and execution without browser persistence;
@@ -201,12 +218,24 @@ The evidence explorer links the policy decision, the checker's approval, the
 maker's lease claim, and the execution, and verifies the organization audit
 chain before presenting the evidence-pack digest.
 
+### 5. A poisoned upstream server caught
+
+![A rug pull caught by the gateway: the pinned description next to the poisoned one the upstream serves now, with its hidden text decoded](docs/assets/upstream-rug-pull.jpg)
+
+In [proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway) the gateway pins each upstream
+tool on review. When the server later swaps a description, the next call is
+blocked and the tool quarantined. **Tool trust** shows the pinned description
+next to the one the server serves now, and decodes the instructions hidden in
+invisible Unicode tag characters.
+
 ## API Surface
 
 ### MCP protocol boundary
 
 - `POST /mcp` — `initialize`, `ping`, `tools/list`, `tools/call`, and
   `notifications/*` (see [Connect Your Client](#connect-your-client))
+- `GET /.well-known/oauth-protected-resource/mcp` — RFC 9728
+  protected-resource metadata, in [OAuth mode](#oauth-resource-server-mode) only
 
 ### Operator API
 
@@ -217,6 +246,8 @@ chain before presenting the evidence-pack digest.
 - `GET /tool-registry`
 - `POST /tool-registry/{tool_id}/verify`
 - `POST /tool-registry/{tool_id}/restore`
+- `GET /upstreams`
+- `POST /upstreams/{server_id}/sync`
 - `GET /requests`
 - `GET /requests/{request_id}`
 - `POST /requests`
@@ -281,7 +312,8 @@ sees every governance decision as a normal tool result:
 | --- | --- | --- |
 | verified low-risk call | `executed` | `false` |
 | high-risk call held for maker-checker | `approval_required` | `false` |
-| policy violation (secret, scope, traversal, production admin) | `denied` | `true` |
+| policy violation (secret, scope, traversal, production admin, changed upstream tool) | `denied` | `true` |
+| upstream tool output that reads like instructions to the agent ([proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway)) | `response_blocked` | `true` |
 
 ### Claude Code
 
@@ -464,7 +496,8 @@ the same path as a built-in one: identity, manifest pin, scope, rate limit,
 argument DLP, risk, maker-checker approval, one-time lease, and evidence. Then it
 is forwarded.
 
-![A rug pull caught by the gateway: the pinned description next to the poisoned one the upstream serves now, with its hidden text decoded](docs/assets/upstream-rug-pull.jpg)
+The [Product Tour](#5-a-poisoned-upstream-server-caught) shows how the console
+presents a caught rug pull.
 
 **What the gateway adds for upstream servers:**
 
@@ -615,6 +648,25 @@ the test run, so they need no authorization server. They cover:
 - unavailable signing keys (`503`);
 - the production guard, and unsafe settings.
 
+The proxy tests (`tests/test_upstream.py`) hold the poisoned example server in
+memory. They cover:
+- pinning on sync, and quarantine on first sight;
+- a rug pull caught by a sync, by a call, and between approval and execution;
+- withheld output, and redacted secrets in clean output;
+- an unreachable upstream, which fails closed;
+- the upstream client: no redirects, the size cap, SSE answers, timeouts, and
+  no forwarded `Authorization`;
+- each injection pattern.
+
+`scripts/mutation_check.py` checks that the tests protect each guard. It
+removes one guard at a time, runs the matching test file, and restores the
+source byte for byte. There are nine mutations for proxy mode and nine for OAuth
+mode, and each one must make a test fail:
+
+```powershell
+python scripts/mutation_check.py          # or: proxy, oauth
+```
+
 ## Production-shaped, Not Production-ready
 
 This repository proves the security control path. It intentionally does not
@@ -651,6 +703,7 @@ See [Threat Model](docs/THREAT_MODEL.md) and
 - maker-checker approval: [docs/assets/approval-workbench.png](docs/assets/approval-workbench.png)
 - Attack Lab: [docs/assets/attack-lab.png](docs/assets/attack-lab.png)
 - evidence chain: [docs/assets/evidence-chain.png](docs/assets/evidence-chain.png)
+- caught upstream rug pull: [docs/assets/upstream-rug-pull.jpg](docs/assets/upstream-rug-pull.jpg)
 - architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - threat model: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
 - API examples: [docs/API_EXAMPLES.md](docs/API_EXAMPLES.md)
