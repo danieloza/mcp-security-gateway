@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,9 +12,20 @@ from mcp_security_gateway import __version__
 from mcp_security_gateway.config import (
     allowed_hosts,
     allowed_origins,
+    auth_mode,
     is_production,
     max_request_bytes,
     redis_url,
+)
+from mcp_security_gateway.oauth import (
+    CONSOLE_SCOPE,
+    MCP_SCOPE,
+    OAuthSettings,
+    SigningKeysUnavailable,
+    TokenRejected,
+    TokenVerifier,
+    challenge,
+    load_oauth_settings,
 )
 from mcp_security_gateway.repository import SQLiteRepository, repository
 from mcp_security_gateway.schemas import (
@@ -72,10 +83,16 @@ def get_service(
     return GatewayService(repo, rates)
 
 
-def get_current_auth(
-    authorization: str | None = Header(default=None),
-    x_api_key: str | None = Header(default=None),
-    service: GatewayService = Depends(get_service),
+@dataclass(frozen=True, slots=True)
+class OAuthRuntime:
+    settings: OAuthSettings
+    verifier: TokenVerifier
+
+
+def _static_auth(
+    authorization: str | None,
+    x_api_key: str | None,
+    service: GatewayService,
 ) -> AuthContext:
     bearer: str | None = None
     if authorization:
@@ -106,6 +123,91 @@ def get_current_auth(
     return auth
 
 
+def _oauth_auth(
+    oauth: OAuthRuntime,
+    authorization: str | None,
+    x_api_key: str | None,
+    service: GatewayService,
+    scope: str,
+) -> AuthContext:
+    """Validate an access token for this resource and map it to a gateway user.
+
+    Details never echo the token or its claims. The token itself goes no further
+    than this function: the request continues with the mapped user only.
+    """
+
+    def unauthorized(detail: str, error: str | None = None) -> HTTPException:
+        return HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=detail,
+            headers={"WWW-Authenticate": challenge(oauth.settings, scope, error)},
+        )
+
+    scheme, _, token = (authorization or "").partition(" ")
+    if not authorization or x_api_key is not None:
+        # Static keys, X-API-Key included, are not credentials in this mode.
+        raise unauthorized("An OAuth access token is required.")
+    if scheme.lower() != "bearer" or not token:
+        raise unauthorized("Authorization must use the Bearer scheme.", "invalid_request")
+    try:
+        verified = oauth.verifier.verify(token)
+    except SigningKeysUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Access tokens cannot be verified right now.",
+        ) from exc
+    except TokenRejected as exc:
+        raise unauthorized("The access token is invalid for this resource.", "invalid_token") from exc
+    if scope not in verified.scopes:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"The access token lacks the {scope} scope.",
+            headers={"WWW-Authenticate": challenge(oauth.settings, scope, "insufficient_scope")},
+        )
+    user_id = oauth.settings.subjects.get(verified.subject)
+    user = service.repo.get_user(user_id) if user_id else None
+    if user is None:
+        # A valid token for someone the gateway does not know: refused, never provisioned.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="The token's subject is not a gateway user.",
+        )
+    return AuthContext(user)
+
+
+def _authenticate(
+    request: Request,
+    authorization: str | None,
+    x_api_key: str | None,
+    service: GatewayService,
+    scope: str,
+) -> AuthContext:
+    oauth: OAuthRuntime | None = getattr(request.app.state, "oauth", None)
+    if oauth is None:
+        return _static_auth(authorization, x_api_key, service)
+    return _oauth_auth(oauth, authorization, x_api_key, service, scope)
+
+
+def get_current_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+    service: GatewayService = Depends(get_service),
+) -> AuthContext:
+    """The operator API. In OAuth mode it needs the `gateway:console` scope."""
+    return _authenticate(request, authorization, x_api_key, service, CONSOLE_SCOPE)
+
+
+def get_mcp_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None),
+    service: GatewayService = Depends(get_service),
+) -> AuthContext:
+    """The MCP endpoint. In OAuth mode it needs the `mcp:tools` scope."""
+    return _authenticate(request, authorization, x_api_key, service, MCP_SCOPE)
+
+
 def _raise_service_error(exc: Exception) -> None:
     if isinstance(exc, PermissionError):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
@@ -134,7 +236,14 @@ def _mcp_tool_result(
 def create_app(
     repo: SQLiteRepository | None = None,
     rates: RateLimitStore | None = None,
+    token_verifier: TokenVerifier | None = None,
 ) -> FastAPI:
+    # Read first: production refuses to start with the public static keys.
+    mode = auth_mode()
+    oauth: OAuthRuntime | None = None
+    if mode == "oauth":
+        settings = token_verifier.settings if token_verifier else load_oauth_settings()
+        oauth = OAuthRuntime(settings, token_verifier or TokenVerifier(settings))
     docs_url = None if is_production() else "/docs"
     openapi_url = None if is_production() else "/openapi.json"
     app = FastAPI(
@@ -145,6 +254,7 @@ def create_app(
         openapi_url=openapi_url,
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
+    app.state.oauth = oauth
     package_path = Path(__file__).parent
     dashboard_path = package_path / "dashboard.html"
     dashboard_css_path = package_path / "dashboard.css"
@@ -202,7 +312,16 @@ def create_app(
 
     @app.get("/health", response_model=HealthOut)
     def health(service: GatewayService = Depends(get_service)) -> HealthOut:
-        return HealthOut(**service.health_snapshot())
+        return HealthOut(**service.health_snapshot(), auth_mode=mode)
+
+    if oauth is not None:
+        metadata = oauth.settings.metadata_document()
+
+        # RFC 9728 protected-resource metadata, at the path-inserted URI only:
+        # a document at the root would have to describe the origin, not /mcp.
+        @app.get(oauth.settings.metadata_path, include_in_schema=False)
+        def protected_resource_metadata() -> JSONResponse:
+            return JSONResponse(metadata)
 
     @app.get("/me", response_model=UserOut)
     def me(auth: AuthContext = Depends(get_current_auth)) -> UserOut:
@@ -392,7 +511,7 @@ def create_app(
         mcp_method: str | None = Header(default=None, alias="Mcp-Method"),
         mcp_name: str | None = Header(default=None, alias="Mcp-Name"),
         protocol_version: str | None = Header(default=None, alias="MCP-Protocol-Version"),
-        auth: AuthContext = Depends(get_current_auth),
+        auth: AuthContext = Depends(get_mcp_auth),
         service: GatewayService = Depends(get_service),
     ) -> dict[str, Any] | Response:
         if origin and origin.rstrip("/") not in allowed_origins():

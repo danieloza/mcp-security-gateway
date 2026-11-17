@@ -1,0 +1,99 @@
+{
+  "realm": "gateway",
+  "enabled": true,
+  "displayName": "MCP Security Gateway (local demo)",
+  "accessTokenLifespan": 300,
+  "sslRequired": "none",
+  "clientScopes": [
+    {
+      "name": "basic",
+      "description": "Subject claim for every access token",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "false", "display.on.consent.screen": "false" },
+      "protocolMappers": [
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": { "access.token.claim": "true", "introspection.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "name": "mcp:tools",
+      "description": "Call governed tools through the gateway's MCP endpoint",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" },
+      "protocolMappers": [
+        {
+          "name": "gateway-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "http://127.0.0.1:8000/mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "gateway:console",
+      "description": "Use the gateway's operator API",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" },
+      "protocolMappers": [
+        {
+          "name": "gateway-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "http://127.0.0.1:8000/mcp",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "gateway-demo-cli",
+      "name": "Scripted demo tokens (local only)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "fullScopeAllowed": false,
+      "defaultClientScopes": ["basic"],
+      "optionalClientScopes": ["mcp:tools", "gateway:console"]
+    }
+  ],
+  "users": [
+    {
+      "id": "5f6c1d2e-0a41-4f43-9a0b-6e1d7c2a9b01",
+      "username": "ops",
+      "firstName": "Daniel",
+      "lastName": "Operator",
+      "email": "ops@gateway.local",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "ops-demo", "temporary": false }]
+    },
+    {
+      "id": "8a3e4b7c-2d19-4c55-b1e2-3f9a0d6c4e02",
+      "username": "security",
+      "firstName": "Sandra",
+      "lastName": "Security",
+      "email": "security@gateway.local",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "security-demo", "temporary": false }]
+    }
+  ]
+}
