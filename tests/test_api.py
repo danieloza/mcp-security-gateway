@@ -509,6 +509,26 @@ def test_mcp_protocol_version_header_is_validated(tmp_path: Path) -> None:
     assert unsupported.status_code == 400
 
 
+def test_newer_revision_discovery_probe_is_refused_so_the_client_falls_back(tmp_path: Path) -> None:
+    # Claude Code 2.1.248 opens with a `server/discover` probe for revision
+    # 2026-07-28. Refusing that revision with 400 is what makes it fall back to
+    # `initialize`, which then negotiates a revision the gateway supports.
+    client, _, _ = make_client(tmp_path)
+    probe = client.post(
+        "/mcp",
+        headers={**OPERATOR, "MCP-Protocol-Version": "2026-07-28"},
+        json={"jsonrpc": "2.0", "id": "server-discover-probe-1", "method": "server/discover", "params": {}},
+    )
+    fallback = client.post(
+        "/mcp",
+        headers=OPERATOR,
+        json={"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-11-25"}},
+    )
+    assert probe.status_code == 400
+    assert fallback.status_code == 200
+    assert fallback.json()["result"]["protocolVersion"] == "2025-11-25"
+
+
 def test_mcp_client_handshake_reaches_a_governed_tool_call(tmp_path: Path) -> None:
     client, _, _ = make_client(tmp_path)
     initialize = client.post(
