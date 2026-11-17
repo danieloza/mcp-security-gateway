@@ -50,6 +50,7 @@ from mcp_security_gateway.schemas import (
     UserOut,
 )
 from mcp_security_gateway.services import AuthContext, GatewayService
+from mcp_security_gateway.upstream import UpstreamRegistry, load_upstreams
 from mcp_security_gateway.state import RateLimitStore, build_rate_limit_store
 from mcp_security_gateway.tool_registry import public_manifest
 
@@ -77,10 +78,11 @@ def get_rate_limit_store() -> RateLimitStore:
 
 
 def get_service(
+    request: Request,
     repo: SQLiteRepository = Depends(get_repository),
     rates: RateLimitStore = Depends(get_rate_limit_store),
 ) -> GatewayService:
-    return GatewayService(repo, rates)
+    return GatewayService(repo, rates, upstreams=getattr(request.app.state, "upstreams", None))
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +239,7 @@ def create_app(
     repo: SQLiteRepository | None = None,
     rates: RateLimitStore | None = None,
     token_verifier: TokenVerifier | None = None,
+    upstreams: UpstreamRegistry | None = None,
 ) -> FastAPI:
     # Read first: production refuses to start with the public static keys.
     mode = auth_mode()
@@ -255,6 +258,11 @@ def create_app(
     )
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
     app.state.oauth = oauth
+    # Upstream MCP servers come from configuration only; an agent never names one.
+    registry = upstreams if upstreams is not None else UpstreamRegistry.from_configs(load_upstreams())
+    app.state.upstreams = registry
+    if registry:
+        GatewayService(repo or repository, rates or rate_limit_store, upstreams=registry).register_upstreams()
     package_path = Path(__file__).parent
     dashboard_path = package_path / "dashboard.html"
     dashboard_css_path = package_path / "dashboard.css"
@@ -385,6 +393,25 @@ def create_app(
         except (PermissionError, ValueError) as exc:
             _raise_service_error(exc)
         return ToolManifestOut(**public_manifest(manifest))
+
+    @app.get("/upstreams")
+    def list_upstreams(
+        auth: AuthContext = Depends(get_current_auth),
+        service: GatewayService = Depends(get_service),
+    ) -> list[dict[str, Any]]:
+        return service.list_upstreams(auth)
+
+    @app.post("/upstreams/{server_id}/sync")
+    def sync_upstream(
+        server_id: str,
+        auth: AuthContext = Depends(get_current_auth),
+        service: GatewayService = Depends(get_service),
+    ) -> dict[str, Any]:
+        try:
+            return service.sync_upstream(auth, server_id)
+        except (PermissionError, ValueError) as exc:
+            _raise_service_error(exc)
+        raise AssertionError("unreachable")
 
     @app.get("/requests", response_model=list[RequestOut])
     def list_requests(
@@ -600,16 +627,8 @@ def create_app(
                 if not isinstance(request_id, str) or not isinstance(lease, str):
                     raise ValueError("Both requestId and capabilityLease are required.")
                 execution = service.execute_with_lease(auth, request_id, arguments, lease)
-                return _mcp_tool_result(
-                    payload.id,
-                    status_value="executed",
-                    message="Approved tool call executed through the controlled adapter.",
-                    structured={
-                        "requestId": execution.request_id,
-                        "executionId": execution.id,
-                        "result": json_loads_safe(execution.result_json),
-                        "resultDigest": execution.result_digest,
-                    },
+                return _execution_result(
+                    payload.id, execution, "Approved tool call executed through the controlled adapter."
                 )
 
             manifest = service.repo.get_tool_by_name(auth.user.organization_id, name)
@@ -631,17 +650,7 @@ def create_app(
             )
             if gateway_request.status == "approved":
                 execution = service.execute_allowed_request(auth, gateway_request.id, arguments)
-                return _mcp_tool_result(
-                    payload.id,
-                    status_value="executed",
-                    message="Low-risk verified tool call executed.",
-                    structured={
-                        "requestId": gateway_request.id,
-                        "executionId": execution.id,
-                        "result": json_loads_safe(execution.result_json),
-                        "resultDigest": execution.result_digest,
-                    },
-                )
+                return _execution_result(payload.id, execution, "Low-risk verified tool call executed.")
             if gateway_request.status == "awaiting_approval":
                 return _mcp_tool_result(
                     payload.id,
@@ -674,6 +683,26 @@ def create_app(
             )
 
     return app
+
+
+def _execution_result(request_id: str | int | None, execution: Any, message: str) -> dict[str, Any]:
+    result = json_loads_safe(execution.result_json)
+    structured = {
+        "requestId": execution.request_id,
+        "executionId": execution.id,
+        "resultDigest": execution.result_digest,
+    }
+    if isinstance(result, dict) and result.get("withheld"):
+        # The upstream ran, but its output looked like instructions to the agent:
+        # the agent gets the finding types and a digest, never the text.
+        return _mcp_tool_result(
+            request_id,
+            status_value="response_blocked",
+            message="The tool ran, but its output was withheld: it looked like instructions to the agent.",
+            structured={**structured, "findings": result.get("findings", []), "contentDigest": result.get("content_digest")},
+            is_error=True,
+        )
+    return _mcp_tool_result(request_id, status_value="executed", message=message, structured={**structured, "result": result})
 
 
 def json_loads_safe(value: str) -> Any:

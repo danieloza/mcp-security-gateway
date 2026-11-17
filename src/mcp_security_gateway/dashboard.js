@@ -8,6 +8,8 @@ const state = {
   tools: [],
   approvals: [],
   incidents: [],
+  upstreams: [],
+  syncResults: new Map(),
   demoArguments: new Map(),
   expanded: new Set(),
   labResult: null,
@@ -161,19 +163,22 @@ async function connectCredential(key) {
 
 async function loadAuthenticatedData() {
   if (!state.key) return;
-  const [requests, tools, approvals, incidents] = await Promise.all([
+  const [requests, tools, approvals, incidents, upstreams] = await Promise.all([
     api("/requests"),
     api("/tool-registry"),
     api("/approvals"),
     api("/incidents"),
+    api("/upstreams"),
   ]);
   state.requests = requests;
   state.tools = tools;
   state.approvals = approvals;
   state.incidents = incidents;
+  state.upstreams = upstreams;
   await loadHealth();
   renderMetrics();
   renderRequests();
+  renderUpstreams();
   renderTools();
   renderApprovals();
 }
@@ -289,6 +294,117 @@ function renderRequests() {
   });
 }
 
+// Characters that render as nothing are shown as code points, and text smuggled
+// in Unicode tag characters is decoded, so an operator reads what a model would.
+function isInvisible(code) {
+  return (
+    (code >= 0xe0000 && code <= 0xe007f) ||
+    (code >= 0x200b && code <= 0x200f) ||
+    (code >= 0x202a && code <= 0x202e) ||
+    (code >= 0x2060 && code <= 0x2064) ||
+    (code >= 0x2066 && code <= 0x2069) ||
+    code === 0xfeff
+  );
+}
+
+function revealInvisible(text) {
+  let out = "";
+  let smuggled = "";
+  const flush = () => {
+    if (smuggled) out += ` [hidden text: "${smuggled}"]`;
+    smuggled = "";
+  };
+  for (const char of String(text ?? "")) {
+    const code = char.codePointAt(0);
+    if (code >= 0xe0020 && code <= 0xe007e) {
+      smuggled += String.fromCodePoint(code - 0xe0000);
+      continue;
+    }
+    flush();
+    out += isInvisible(code) ? `[U+${code.toString(16).toUpperCase().padStart(4, "0")}]` : char;
+  }
+  flush();
+  return out;
+}
+
+function renderUpstreams() {
+  const panel = byId("upstream-panel");
+  panel.replaceChildren();
+  panel.hidden = state.upstreams.length === 0;
+  state.upstreams.forEach((upstream) => {
+    const card = document.createElement("article");
+    card.className = "registry-card upstream-card";
+    const header = document.createElement("header");
+    const quarantined = upstream.tools.filter((tool) => tool.trust_status !== "verified").length;
+    header.append(textElement("h3", upstream.name), badge(quarantined ? "quarantined" : "verified"));
+    const meta = document.createElement("div");
+    meta.className = "manifest-meta";
+    [
+      ["Upstream", upstream.url],
+      ["Exposed as", `${upstream.prefix}.*`],
+      ["Scope", upstream.scope],
+      ["Pinned tools", `${upstream.tools.length} (${quarantined} quarantined)`],
+    ].forEach(([label, value]) => {
+      const item = document.createElement("div");
+      item.append(textElement("span", label), textElement("strong", value));
+      meta.append(item);
+    });
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+    const button = textElement("button", "Sync upstream", "button button-primary button-small");
+    button.type = "button";
+    button.addEventListener("click", () => syncUpstream(upstream.id, button));
+    actions.append(button);
+    card.append(header, meta, actions);
+    const results = state.syncResults.get(upstream.id);
+    if (results) card.append(renderSyncResults(results));
+    panel.append(card);
+  });
+}
+
+function renderSyncResults(results) {
+  const list = document.createElement("div");
+  list.className = "sync-results";
+  results.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "sync-result";
+    const head = document.createElement("div");
+    head.className = "sync-result-head";
+    head.append(textElement("strong", item.tool), badge(item.status));
+    if (item.reason) head.append(textElement("span", item.reason.replaceAll("_", " "), "sync-reason"));
+    row.append(head);
+    if (item.findings && item.findings.length) {
+      const types = [...new Set(item.findings.map((finding) => finding.type.replaceAll("_", " ")))];
+      row.append(textElement("p", `Findings: ${types.join(", ")}`, "sync-findings"));
+    }
+    if (item.pinned_description !== undefined) {
+      row.append(
+        textElement("span", "Pinned description", "diff-label"),
+        textElement("pre", revealInvisible(item.pinned_description), "diff-block"),
+        textElement("span", "Served now", "diff-label"),
+        textElement("pre", revealInvisible(item.upstream_description), "diff-block diff-changed"),
+      );
+    }
+    list.append(row);
+  });
+  return list;
+}
+
+async function syncUpstream(id, button) {
+  button.disabled = true;
+  try {
+    const result = await api(`/upstreams/${encodeURIComponent(id)}/sync`, { method: "POST" });
+    state.syncResults.set(id, result.results);
+    const quarantined = result.results.filter((item) => item.status === "quarantined").length;
+    toast(quarantined ? `${quarantined} tool(s) quarantined.` : "Upstream in sync: no changes.", quarantined > 0);
+    await loadAuthenticatedData();
+  } catch (error) {
+    toast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 function renderTools() {
   const grid = byId("registry-grid");
   grid.replaceChildren();
@@ -302,7 +418,7 @@ function renderTools() {
     const header = document.createElement("header");
     const title = textElement("h3", tool.name);
     header.append(title, badge(tool.trust_status));
-    const description = textElement("p", tool.description);
+    const description = textElement("p", revealInvisible(tool.description));
 
     const meta = document.createElement("div");
     meta.className = "manifest-meta";

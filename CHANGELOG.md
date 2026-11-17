@@ -4,6 +4,31 @@ Significant changes to the MCP Security Gateway are documented here.
 
 ## [Unreleased]
 
+### Proxy mode for upstream MCP servers
+
+- **The gateway can sit in front of real MCP servers over Streamable HTTP.**
+  Upstreams are configured in `MSG_UPSTREAMS`, a JSON list. Every upstream call
+  follows the built-in control path, then is forwarded.
+- **Pinning.** `POST /upstreams/{id}/sync`, or **Sync upstream** in the console,
+  pins new tools under `<prefix>.<name>`. A new tool whose definition carries
+  hidden instructions is quarantined on first sight.
+- **Rug-pull detection.** The upstream definition is re-read on every call and
+  again just before forwarding. A changed definition quarantines the tool and
+  blocks the call, including between approval and execution. The console shows
+  the pinned and served descriptions side by side, and decodes text hidden in
+  Unicode tag characters.
+- **Output inspection.** Tool output that looks like instructions to the agent
+  is withheld (`response_blocked`, with the finding types and a digest). The
+  checks are heuristics, and the README says so.
+- **Quarantined tools no longer appear in `tools/list`.**
+- **A minimal upstream client** on `httpx`: no redirects, a 1 MiB cap, a timeout,
+  JSON and SSE answers, and never the caller's credentials. An unreachable
+  upstream fails closed.
+- **`examples/poisoned_server.py`:** a deliberately malicious MCP server for
+  demos (test fixture).
+- **New runtime dependency:** `httpx`.
+- **Tests:** 28 proxy tests (122 in all), and 9 of 9 mutations caught.
+
 ### OAuth resource-server mode
 
 - `MSG_AUTH_MODE=oauth` turns the gateway into an OAuth 2.1 resource server, as

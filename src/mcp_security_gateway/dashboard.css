@@ -1115,7 +1115,79 @@ tbody tr:hover {
   }
 }
 
+/* Upstream MCP servers: sync results and the pinned-versus-served diff. */
+.upstream-panel {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.upstream-card .manifest-meta {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.upstream-card .manifest-meta strong {
+  overflow-wrap: anywhere;
+}
+
+.sync-results {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+
+.sync-result {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgb(2 6 23 / 0.42);
+  padding: 11px;
+}
+
+.sync-result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.sync-reason,
+.sync-findings,
+.diff-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sync-findings {
+  margin: 0;
+  color: var(--amber);
+}
+
+.diff-block {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  padding: 9px 11px;
+  color: var(--text);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-changed {
+  border-color: var(--red);
+}
+
 @media (max-width: 1180px) {
+  .upstream-card .manifest-meta {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -37,6 +37,7 @@ from mcp_security_gateway.security import (
     utc_now,
     utc_now_iso,
 )
+from mcp_security_gateway.injection import inspect_value
 from mcp_security_gateway.state import InMemoryRateLimitStore, RateLimitStore
 from mcp_security_gateway.tool_registry import (
     manifest_as_protocol_tool,
@@ -44,6 +45,16 @@ from mcp_security_gateway.tool_registry import (
     validate_arguments,
     verify_candidate,
 )
+from mcp_security_gateway.upstream import (
+    UpstreamConfig,
+    UpstreamError,
+    UpstreamRegistry,
+    tool_definition,
+)
+
+
+class UpstreamDrift(PermissionError):
+    """The upstream's definition of a pinned tool no longer matches the pin."""
 
 
 @dataclass(slots=True)
@@ -158,10 +169,12 @@ class GatewayService:
         repo: SQLiteRepository,
         rate_limits: RateLimitStore,
         executor: ControlledToolExecutor | None = None,
+        upstreams: UpstreamRegistry | None = None,
     ) -> None:
         self.repo = repo
         self.rate_limits = rate_limits
         self.executor = executor or ControlledToolExecutor()
+        self.upstreams = upstreams or UpstreamRegistry()
         self.audit_key = audit_hmac_key()
 
     def build_auth_context(self, api_key: str) -> AuthContext | None:
@@ -199,7 +212,271 @@ class GatewayService:
         return self.repo.list_tools(auth.user.organization_id)
 
     def protocol_tools(self, auth: AuthContext) -> list[dict[str, Any]]:
-        return [manifest_as_protocol_tool(item) for item in self.list_tools(auth)]
+        # Only verified tools reach the agent: a quarantined tool's description
+        # may be the poisoned text that caused the quarantine.
+        return [manifest_as_protocol_tool(item) for item in self.list_tools(auth) if item.trust_status == "verified"]
+
+    # --- Upstream MCP servers -------------------------------------------------
+
+    def register_upstreams(self) -> None:
+        """Create a server row for each configured upstream. Tools arrive by sync."""
+        for config in self.upstreams.configs():
+            self.repo.register_server(
+                MCPServer(
+                    id=config.id,
+                    organization_id=config.organization_id,
+                    name=config.name,
+                    environment="upstream",
+                    sensitivity="untrusted",
+                    allowed_scopes=config.scope,
+                    trust_status="verified",
+                )
+            )
+
+    def list_upstreams(self, auth: AuthContext) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": config.id,
+                "name": config.name,
+                "url": config.url,
+                "prefix": config.prefix,
+                "scope": config.scope,
+                "tools": [public_manifest(tool) for tool in self.repo.list_server_tools(auth.user.organization_id, config.id)],
+            }
+            for config in self.upstreams.configs()
+            if config.organization_id == auth.user.organization_id
+        ]
+
+    def _upstream_entry(self, organization_id: str, server_id: str) -> tuple[UpstreamConfig, Any]:
+        entry = self.upstreams.get(server_id)
+        if not entry or entry[0].organization_id != organization_id:
+            raise ValueError(f"Unknown upstream server '{server_id}'.")
+        return entry
+
+    @staticmethod
+    def _candidate(config: UpstreamConfig, definition: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "name": config.exposed_name(definition["name"]),
+            "description": definition["description"],
+            "input_schema": definition["input_schema"],
+            "annotations": definition["annotations"],
+        }
+
+    def _upstream_drift(self, manifest: ToolManifest) -> dict[str, Any] | None:
+        """Compare a pinned tool with what its upstream serves now. None means unchanged."""
+        config, client = self._upstream_entry(manifest.organization_id, manifest.mcp_server_id)
+        upstream_name = config.upstream_name(manifest.name)
+        current = next((tool for tool in client.list_tools() if tool.get("name") == upstream_name), None)
+        if current is None:
+            return {"tool_id": manifest.id, "status": "missing_upstream", "changed_fields": ["name"], "findings": []}
+        definition = tool_definition(current)
+        result = verify_candidate(manifest, self._candidate(config, definition))
+        if result["status"] == "verified":
+            return None
+        result["findings"] = inspect_value(
+            {key: definition[key] for key in ("description", "input_schema", "annotations")}
+        )
+        result["pinned_description_digest"] = digest_json(manifest.description)
+        result["upstream_description_digest"] = digest_json(definition["description"])
+        result["upstream_description"] = definition["description"]
+        return result
+
+    def _quarantine_upstream_tool(
+        self,
+        auth: AuthContext,
+        manifest: ToolManifest,
+        drift: dict[str, Any],
+        *,
+        reason: str,
+    ) -> None:
+        if manifest.trust_status != "quarantined":
+            self.repo.set_tool_trust(manifest.organization_id, manifest.id, "quarantined")
+        self._audit(
+            organization_id=manifest.organization_id,
+            event_type="tool_quarantined",
+            subject_id=manifest.id,
+            actor_id=auth.user.id,
+            payload={
+                "reason": reason,
+                "status": drift["status"],
+                "changed_fields": drift["changed_fields"],
+                "findings": drift.get("findings", []),
+                "pinned_description_digest": drift.get("pinned_description_digest"),
+                "upstream_description_digest": drift.get("upstream_description_digest"),
+            },
+        )
+
+    def sync_upstream(self, auth: AuthContext, server_id: str) -> dict[str, Any]:
+        """Pin new upstream tools, quarantine poisoned or changed ones (trust on first review)."""
+        if auth.user.role not in {"security_admin", "platform_admin"}:
+            raise PermissionError("Only security or platform admins can sync an upstream server.")
+        organization_id = auth.user.organization_id
+        config, client = self._upstream_entry(organization_id, server_id)
+        try:
+            tools = client.list_tools()
+        except UpstreamError as exc:
+            raise ValueError(f"Upstream '{server_id}' could not be read: {exc}") from exc
+
+        results: list[dict[str, Any]] = []
+        served: set[str] = set()
+        for tool in tools:
+            definition = tool_definition(tool)
+            name = definition["name"]
+            if not name or not name.replace("_", "").replace("-", "").isalnum():
+                results.append({"tool": name, "status": "rejected", "detail": "tool name is not a plain identifier"})
+                continue
+            exposed = config.exposed_name(name)
+            served.add(exposed)
+            existing = self.repo.get_tool_by_name(organization_id, exposed)
+            if existing is not None and existing.mcp_server_id != server_id:
+                results.append({"tool": exposed, "status": "rejected", "detail": "name is taken by another server"})
+                continue
+            if existing is None:
+                poisoned = inspect_value({key: definition[key] for key in ("description", "input_schema", "annotations")})
+                manifest = self.repo.register_tool_definition(
+                    {
+                        "id": "tool_" + digest_json({"server": server_id, "name": name})[:24],
+                        "organization_id": organization_id,
+                        "mcp_server_id": server_id,
+                        "name": exposed,
+                        "description": definition["description"],
+                        "required_scope": config.scope,
+                        "risk_level": config.risk_for(name),
+                        "input_schema": definition["input_schema"],
+                        "annotations": definition["annotations"],
+                    }
+                )
+                if poisoned:
+                    self._quarantine_upstream_tool(
+                        auth,
+                        manifest,
+                        {"status": "poisoned_definition", "changed_fields": [], "findings": poisoned},
+                        reason="tool_poisoning",
+                    )
+                    self._incident(
+                        organization_id,
+                        manifest.id,
+                        "critical",
+                        "Tool poisoning: a new upstream tool's description carries hidden instructions.",
+                    )
+                    results.append({"tool": exposed, "status": "quarantined", "reason": "tool_poisoning", "findings": poisoned})
+                else:
+                    self._audit(
+                        organization_id=organization_id,
+                        event_type="tool_pinned",
+                        subject_id=manifest.id,
+                        actor_id=auth.user.id,
+                        payload={"manifest_digest": manifest.manifest_digest, "server_id": server_id},
+                    )
+                    results.append({"tool": exposed, "status": "pinned", "manifest_digest": manifest.manifest_digest})
+                continue
+            check = verify_candidate(existing, self._candidate(config, definition))
+            if check["status"] == "verified":
+                results.append({"tool": exposed, "status": existing.trust_status if existing.trust_status != "verified" else "unchanged"})
+                continue
+            drift = {
+                **check,
+                "findings": inspect_value({key: definition[key] for key in ("description", "input_schema", "annotations")}),
+                "pinned_description_digest": digest_json(existing.description),
+                "upstream_description_digest": digest_json(definition["description"]),
+            }
+            # A tool already quarantined (by a call that saw the change first) is
+            # reported with its diff, without a second incident.
+            if existing.trust_status == "verified":
+                self._quarantine_upstream_tool(auth, existing, drift, reason="rug_pull")
+                self._incident(
+                    organization_id,
+                    existing.id,
+                    "critical",
+                    "Rug pull: an upstream tool changed after it was pinned and was quarantined.",
+                )
+            results.append(
+                {
+                    "tool": exposed,
+                    "status": "quarantined",
+                    "reason": "rug_pull",
+                    "changed_fields": check["changed_fields"],
+                    "findings": drift["findings"],
+                    "pinned_description": existing.description,
+                    "upstream_description": definition["description"],
+                }
+            )
+        for tool in self.repo.list_server_tools(organization_id, server_id):
+            if tool.name not in served:
+                results.append({"tool": tool.name, "status": "missing_upstream"})
+        return {"server_id": server_id, "synced_at": utc_now_iso(), "results": results}
+
+    def _incident(self, organization_id: str, subject_id: str, severity: str, summary: str) -> None:
+        self.repo.save_incident(
+            Incident(
+                id=new_id("inc"),
+                request_id=subject_id,
+                organization_id=organization_id,
+                severity=severity,
+                summary=summary,
+                created_at=utc_now_iso(),
+            )
+        )
+
+    def _run_tool(self, auth: AuthContext, request: GatewayRequest, arguments: dict[str, Any]) -> dict[str, Any]:
+        entry = self.upstreams.get(request.mcp_server_id)
+        if entry is None:
+            return self.executor.execute(request.tool_name, arguments)
+        config, client = entry
+        manifest = self.repo.get_tool_by_name(request.organization_id, request.tool_name)
+        if manifest is None:
+            raise PermissionError("Tool manifest is not registered.")
+        # Re-read just before forwarding: a change between approval and execution
+        # must not reach the upstream call either.
+        try:
+            drift = self._upstream_drift(manifest)
+        except UpstreamError as exc:
+            raise PermissionError(f"Upstream could not be re-verified: {exc}") from exc
+        if drift is not None:
+            self._quarantine_upstream_tool(auth, manifest, drift, reason="rug_pull_before_execution")
+            self._incident(
+                request.organization_id,
+                request.id,
+                "critical",
+                "Rug pull between approval and execution: the call was stopped and the tool quarantined.",
+            )
+            raise UpstreamDrift("Upstream tool definition changed after approval; the tool is quarantined.")
+        try:
+            # Only the arguments the policy evaluated. No credential of the caller is available here.
+            answer = client.call_tool(config.upstream_name(request.tool_name) or "", arguments)
+        except UpstreamError as exc:
+            raise PermissionError(f"Upstream call failed: {exc}") from exc
+        output = {"content": answer.get("content", []), "structuredContent": answer.get("structuredContent")}
+        findings = inspect_value(output)
+        if findings:
+            content_digest = digest_json(output)
+            self._incident(
+                request.organization_id,
+                request.id,
+                "high",
+                "Tool output withheld: the upstream returned text that looks like instructions to the agent.",
+            )
+            self._audit(
+                organization_id=request.organization_id,
+                event_type="tool_output_withheld",
+                subject_id=request.id,
+                actor_id=auth.user.id,
+                payload={"findings": findings, "content_digest": content_digest, "server_id": config.id},
+            )
+            return {
+                "mode": "upstream",
+                "server_id": config.id,
+                "withheld": True,
+                "findings": findings,
+                "content_digest": content_digest,
+            }
+        return {
+            "mode": "upstream",
+            "server_id": config.id,
+            "content": output["content"],
+            "structuredContent": output["structuredContent"],
+            "isError": bool(answer.get("isError", False)),
+        }
 
     def list_requests(self, auth: AuthContext) -> list[GatewayRequest]:
         return self.repo.list_requests(auth.user.organization_id)
@@ -276,6 +553,28 @@ class GatewayService:
             )
         )
 
+        # A proxied tool is re-read from its upstream on every call: a definition
+        # that changed after it was pinned (a rug pull) quarantines the tool here.
+        upstream_state: str | None = None
+        upstream_drift: dict[str, Any] | None = None
+        if self.upstreams.get(server.id) and manifest.trust_status == "verified":
+            try:
+                upstream_drift = self._upstream_drift(manifest)
+                upstream_state = "verified" if upstream_drift is None else "drift_detected"
+            except UpstreamError:
+                upstream_state = "unreachable"
+            trace.append(
+                {
+                    "control": "upstream_manifest",
+                    "result": "passed" if upstream_state == "verified" else "failed",
+                    "evidence": upstream_state
+                    if upstream_drift is None
+                    else {"status": upstream_drift["status"], "changed_fields": upstream_drift["changed_fields"]},
+                }
+            )
+            if upstream_drift is not None:
+                self._quarantine_upstream_tool(auth, manifest, upstream_drift, reason="rug_pull")
+
         policy_id = "pol_default_allow"
         status = "approved"
         risk_reason = "verified low-risk tool call inside the approved scope"
@@ -283,7 +582,19 @@ class GatewayService:
         incident_severity: str | None = None
         incident_summary: str | None = None
 
-        if server.trust_status != "verified" or manifest.trust_status != "verified":
+        if upstream_state in {"drift_detected", "unreachable"}:
+            policy_id = "pol_hard_block"
+            status = "blocked"
+            execution_status = "not_executed"
+            if upstream_state == "drift_detected":
+                risk_reason = "upstream tool definition changed since it was pinned"
+                incident_severity = "critical"
+                incident_summary = "Rug pull: an upstream tool changed after it was pinned; the call was blocked and the tool quarantined."
+            else:
+                risk_reason = "upstream tool definition could not be re-verified"
+                incident_severity = "medium"
+                incident_summary = "Upstream MCP server was unreachable; the call failed closed."
+        elif server.trust_status != "verified" or manifest.trust_status != "verified":
             policy_id = "pol_hard_block"
             status = "blocked"
             execution_status = "not_executed"
@@ -843,7 +1154,7 @@ class GatewayService:
             raise PermissionError("Request has already been executed.")
         started = perf_counter()
         try:
-            result = self.executor.execute(request.tool_name, arguments)
+            result = self._run_tool(auth, request, arguments)
         except Exception as exc:
             # The lease may already be consumed, so the failure must be as visible as a success.
             self._record_execution(
