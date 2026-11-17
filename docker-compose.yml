@@ -35,5 +35,20 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Local OAuth demo only: `docker compose --profile oauth up keycloak`.
+  # The realm, its users and their passwords are public fixtures, like the
+  # static demo keys. Tokens are fetched with the password grant of a public
+  # client, which is acceptable for a scripted local demo and nothing else.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4.5
+    profiles: ["oauth"]
+    command: ["start-dev", "--import-realm", "--hostname=http://127.0.0.1:8081"]
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - ./deploy/keycloak/gateway-realm.json:/opt/keycloak/data/import/gateway-realm.json:ro
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   gateway-data:

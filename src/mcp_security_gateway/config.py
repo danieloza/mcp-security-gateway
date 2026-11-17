@@ -27,6 +27,19 @@ def is_production() -> bool:
     return environment() == "production"
 
 
+AUTH_MODES = ("static", "oauth")
+
+
+def auth_mode() -> str:
+    """`static`: the hashed demo keys. `oauth`: access tokens from an external server."""
+    value = os.getenv("MSG_AUTH_MODE", "static").strip().lower()
+    if value not in AUTH_MODES:
+        raise RuntimeError(f"MSG_AUTH_MODE must be one of: {', '.join(AUTH_MODES)}.")
+    if is_production() and value != "oauth":
+        raise RuntimeError("Production requires MSG_AUTH_MODE=oauth; the static demo keys are public.")
+    return value
+
+
 def allowed_hosts() -> list[str]:
     value = os.getenv("MSG_ALLOWED_HOSTS", "127.0.0.1,localhost,testserver")
     return [item.strip() for item in value.split(",") if item.strip()]

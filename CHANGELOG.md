@@ -4,6 +4,30 @@ Significant changes to the MCP Security Gateway are documented here.
 
 ## [Unreleased]
 
+### OAuth resource-server mode
+
+- `MSG_AUTH_MODE=oauth` turns the gateway into an OAuth 2.1 resource server, as
+  MCP 2025-11-25 authorization describes it:
+  - **metadata:** RFC 9728 protected-resource metadata at
+    `/.well-known/oauth-protected-resource/mcp`;
+  - **`401`** with `WWW-Authenticate: Bearer`, `resource_metadata` and `scope`;
+  - **`403`** with `insufficient_scope`;
+  - **token checks:** the signature against the authorization server's JWKS,
+    with asymmetric algorithms only; then `iss`, `exp`, `nbf` and `sub`, and an
+    `aud` that must contain the resource URI (RFC 8707);
+  - **subjects:** each token subject is mapped explicitly to a gateway user. An
+    unknown subject is refused.
+- the scopes are `mcp:tools` for `/mcp` and `gateway:console` for the operator
+  API;
+- static mode is unchanged and stays the default. Production refuses to start in
+  static mode;
+- unavailable signing keys answer `503`, not `401`;
+- a local Keycloak realm, in the compose profile `oauth`, issues scripted demo
+  tokens;
+- new dependency: `PyJWT[crypto]`;
+- 31 OAuth tests (94 in all), with tokens signed by keys generated during the
+  test run.
+
 ### Client verification
 
 - ran the README's client instructions against a local gateway on a fresh

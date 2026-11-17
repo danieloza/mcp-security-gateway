@@ -189,6 +189,7 @@ class HealthOut(StrictModel):
     environment: str
     database_backend: str
     rate_limit_backend: str
+    auth_mode: str
     api_key_storage: str
     protocol: str
     users: int
