@@ -4,6 +4,17 @@ Significant changes to the MCP Security Gateway are documented here.
 
 ## [Unreleased]
 
+### Client verification
+
+- ran the README's client instructions against a local gateway on a fresh
+  database. The MCP Python SDK 2.3.0 got all three decisions (`executed`,
+  `approval_required`, `denied`). Claude Code 2.1.248 reported `✔ Connected`
+  after a full handshake. Cursor and VS Code stay marked as not run;
+- documented the Claude Code handshake: its `server/discover` probe for
+  revision `2026-07-28` is refused with `400`, and it falls back to
+  `initialize` at `2025-11-25`;
+- added a test that pins that refusal and the fallback (63 tests).
+
 ### Operator console
 
 - replace the sidebar with a module launcher: one tile per module, following

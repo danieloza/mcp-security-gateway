@@ -350,11 +350,25 @@ asyncio.run(main())
 - capabilities advertise `tools.listChanged: false`, because there is no
   server-to-client stream (`GET /mcp` returns `405`).
 
-Verification boundary: the official MCP Python SDK 2.3.0 client completed
-`initialize`, `notifications/initialized`, `tools/list`, governed `tools/call`
-outcomes, and `ping` against this gateway, negotiating down from its own
-`2026-07-28` revision. The Claude Code, Cursor, and VS Code snippets follow each
-client's documented remote HTTP format and were not individually exercised.
+Verification boundary, as run on 2026-11-17 against a local gateway on a fresh
+database:
+
+| Client | What was run | Result |
+| --- | --- | --- |
+| MCP Python SDK 2.3.0 | the snippet above, extended to one call per decision | negotiated `2025-11-25`; `tools/list` returned the three tools; `kb.search` → `executed`, `repo.write_file` → `approval_required`, `repo.write_file` with a secret → `denied` (`isError: true`); `ping` answered |
+| Claude Code 2.1.248 | the `claude mcp add` command above, then `claude mcp list` | `✔ Connected` |
+| Cursor, VS Code | not run | the snippets follow each client's documented remote HTTP format |
+
+The Claude Code handshake, as observed on the wire:
+
+1. a `server/discover` probe for revision `2026-07-28` is refused with
+   `400 Bad Request`, because that revision is not supported;
+2. Claude Code falls back to `initialize` and negotiates `2025-11-25`;
+3. `notifications/initialized` returns `202`, the optional `GET /mcp` stream
+   returns `405`, and `tools/list` returns the three tools.
+
+A test pins the refusal of the probe and the fallback. A model calling tools
+through Claude Code was not exercised.
 
 Authentication is a static Bearer credential. The gateway does not publish
 OAuth 2.1 protected-resource metadata, so clients that only connect to remote
