@@ -63,6 +63,9 @@ SUITES: dict[str, tuple[str, list[tuple[str, str, list[tuple[str, str]]]]]] = {
             ("sync allowed for any role", SERVICES, [
                 ('raise PermissionError("Only security or platform admins can sync an upstream server.")', "pass"),
             ]),
+            ("withheld output shown to operators as a plain execution", SERVICES, [
+                ('("output_withheld" if withheld else "executed") if succeeded', '"executed" if succeeded'),
+            ]),
         ],
     ),
     "oauth": (

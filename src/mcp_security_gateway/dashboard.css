@@ -839,6 +839,7 @@ tbody tr:hover {
 .badge-blocked,
 .badge-failed,
 .badge-denied,
+.badge-output_withheld,
 .badge-quarantined,
 .badge-not_executed,
 .badge-drift_detected {

@@ -106,6 +106,8 @@ def test_clean_output_reaches_the_agent(tmp_path: Path) -> None:
     assert result["structuredContent"]["status"] == "executed"
     assert "Sandra" in result["structuredContent"]["result"]["content"][0]["text"]
     assert upstream.calls == [("search_notes", {"query": "rota"})]
+    request = client.get(f"/requests/{result['structuredContent']['requestId']}", headers=OPERATOR).json()
+    assert request["execution_status"] == "executed"
 
 
 def test_injected_output_is_withheld(tmp_path: Path) -> None:
@@ -118,6 +120,10 @@ def test_injected_output_is_withheld(tmp_path: Path) -> None:
     assert {"instruction_override", "concealment", "secret_file_coaxing"} <= {item["type"] for item in structured["findings"]}
     assert "id_rsa" not in json.dumps(result)
     assert any("withheld" in incident["summary"] for incident in client.get("/incidents", headers=OPERATOR).json())
+    # Operators see it too: the request is not shown as a plain execution.
+    request = client.get(f"/requests/{structured['requestId']}", headers=OPERATOR).json()
+    assert request["status"] == "executed"
+    assert request["execution_status"] == "output_withheld"
 
 
 def test_secrets_in_clean_output_are_redacted(tmp_path: Path) -> None:

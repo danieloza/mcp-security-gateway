@@ -395,8 +395,13 @@ async function syncUpstream(id, button) {
   try {
     const result = await api(`/upstreams/${encodeURIComponent(id)}/sync`, { method: "POST" });
     state.syncResults.set(id, result.results);
-    const quarantined = result.results.filter((item) => item.status === "quarantined").length;
-    toast(quarantined ? `${quarantined} tool(s) quarantined.` : "Upstream in sync: no changes.", quarantined > 0);
+    const counts = {};
+    for (const item of result.results) counts[item.status] = (counts[item.status] || 0) + 1;
+    const labels = { pinned: "pinned", quarantined: "quarantined", missing_upstream: "no longer served" };
+    const changes = Object.keys(labels)
+      .filter((status) => counts[status])
+      .map((status) => `${counts[status]} ${labels[status]}`);
+    toast(changes.length ? `Upstream synced: ${changes.join(", ")}.` : "Upstream in sync: no changes.", Boolean(counts.quarantined));
     await loadAuthenticatedData();
   } catch (error) {
     toast(error.message, true);
