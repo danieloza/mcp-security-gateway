@@ -13,7 +13,12 @@
 
 [Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [Proxy Mode](#proxy-mode-real-mcp-servers-behind-the-gateway) · [OAuth](#oauth-resource-server-mode) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
-![MCP Security Gateway module launcher with live status for each module](docs/assets/gateway-dashboard.png)
+![Proxy mode in the console: an upstream server synced, three agent calls, a rug pull blocked, and the diff with its hidden text decoded](docs/assets/proxy-mode-demo.gif)
+
+*A deliberately malicious MCP server behind the gateway. Its tools are pinned
+on review, its injected output never reaches the agent, and a description it
+swaps after review is blocked on the next call. See
+[Proxy Mode](#proxy-mode-real-mcp-servers-behind-the-gateway).*
 
 ## What It Solves
 
@@ -153,6 +158,8 @@ A probe that crashes is reported as a failed control, and the test suite proves
 the lab fails when argument DLP or execution binding is disabled.
 
 ## Operator Console
+
+![MCP Security Gateway module launcher with live status for each module](docs/assets/gateway-dashboard.png)
 
 The dashboard opens on a module launcher: one tile per module, each with a live
 status such as pending approvals or the last Attack Lab score. A tile opens that
@@ -447,7 +454,7 @@ gateway:
 - **lists only verified tools,** and never passes the caller's credentials
   upstream.
 
-![Proxy mode in the console: an upstream server synced, three agent calls, a rug pull blocked, and the diff with its hidden text decoded](docs/assets/proxy-mode-demo.gif)
+The animation at the top of this page is this run, recorded in the console.
 
 ```powershell
 python examples/poisoned_server.py        # a deliberately malicious server on :8100
