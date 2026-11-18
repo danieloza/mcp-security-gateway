@@ -3,11 +3,11 @@
 > Protocol-aware runtime firewall for verified MCP tool execution.
 
 [![CI](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/Release-v0.3.0-22C55E?style=for-the-badge)](https://github.com/danieloza/mcp-security-gateway/releases/tag/v0.3.0)
+[![Release](https://img.shields.io/badge/Release-v0.4.0-22C55E?style=for-the-badge)](https://github.com/danieloza/mcp-security-gateway/releases/tag/v0.4.0)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-62_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-123_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
