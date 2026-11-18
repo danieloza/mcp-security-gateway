@@ -101,6 +101,10 @@ database:
   (`403`), and `security` could;
 - the static demo key got `401 invalid_token`.
 
+**Re-run on 2026-11-18** against Keycloak 26.8.2-2, the version
+`docker-compose.yml` pins now: the realm imported without errors, and every
+step above gave the same result.
+
 **Claude Code 2.1.248**, pointed at the gateway in this mode without a header,
 read the 401 challenge, fetched the metadata, found the Keycloak realm and tried
 dynamic client registration. The realm's "Trusted Hosts" policy refused it: the

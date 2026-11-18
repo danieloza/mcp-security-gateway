@@ -430,8 +430,9 @@ external authorization server, and never issues them:
 - **Boundaries.** The token is never passed through, and the static demo keys
   are refused. Production refuses to start in static mode.
 
-It has been run against a local Keycloak 26.4.5 realm from the compose profile
-`oauth`. **[docs/OAUTH.md](docs/OAUTH.md)** has:
+It has been run against a local Keycloak realm from the compose profile
+`oauth`, on Keycloak 26.4.5 and again on 26.8.2-2.
+**[docs/OAUTH.md](docs/OAUTH.md)** has:
 
 - the configuration;
 - a walkthrough with scripted tokens;
