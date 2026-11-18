@@ -4,6 +4,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Debian security updates published after the base image was built.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 10001 gateway \
     && useradd --uid 10001 --gid gateway --create-home --shell /usr/sbin/nologin gateway
 
@@ -12,8 +17,11 @@ WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 
+# pip, setuptools and wheel come with the base image and are only needed to
+# install; the build gets its own copies, so the runtime image drops all three.
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir . \
+    && python -m pip uninstall --yes setuptools wheel pip \
     && mkdir -p /app/data \
     && chown -R gateway:gateway /app
 

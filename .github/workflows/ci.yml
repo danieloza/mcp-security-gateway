@@ -85,3 +85,37 @@ jobs:
 
       - name: Run the poisoned server and the gateway, with the MCP SDK as the agent
         run: python scripts/e2e_proxy.py
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the image
+        run: docker compose build api
+
+      - name: Scan the image for fixable high and critical vulnerabilities
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+          mcp-security-gateway-api:latest
+
+      - name: Start the gateway and Redis
+        run: docker compose up -d --wait --wait-timeout 120
+
+      - name: Smoke-test health and an MCP call
+        run: python3 scripts/docker_smoke.py
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down

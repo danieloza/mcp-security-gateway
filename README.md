@@ -498,10 +498,33 @@ docker compose config --quiet
 docker compose up --build
 ```
 
-Compose binds the API to loopback, keeps Redis on the internal network, drops
-Linux capabilities, uses a non-root application user, and mounts only the
-persistent SQLite data volume. The local fallback audit key remains a
-development convenience; configure a managed secret for any non-local runtime.
+Compose sets up both containers like this:
+- the API is bound to loopback, and Redis stays on the internal network;
+- both containers drop every Linux capability;
+- the API runs as a non-root user with a read-only root filesystem, and mounts
+  only the persistent SQLite data volume;
+- Redis runs as its own user, so it needs no capability to switch users.
+
+The image holds only what the gateway needs at run time. Debian security
+updates are applied when it is built, and pip, setuptools and wheel are removed
+after the install. The local fallback audit key is still only a development
+convenience; configure a managed secret for any non-local runtime.
+
+**CI checks the image on every pull request** (the `docker` job):
+- it builds the image;
+- it scans it with Trivy, and fails on any HIGH or CRITICAL vulnerability that
+  has a fix;
+- it starts the image with Redis;
+- `scripts/docker_smoke.py` checks `/health` and one MCP call.
+
+**Some findings have no fix yet.** A scan on 2026-11-18 reported 47 HIGH and no
+CRITICAL findings for which Debian has no fix yet, in util-linux, ncurses,
+perl, systemd and SQLite libraries. Three of them are in `libsqlite3-0`, which
+the gateway uses.
+
+**`docker compose down -v` deletes the `gateway-data` volume and the gateway's
+database with it.** To stop the stack and keep the data, use
+`docker compose down`.
 
 ## Testing
 
