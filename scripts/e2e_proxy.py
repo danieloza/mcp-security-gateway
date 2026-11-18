@@ -36,16 +36,21 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
+import ci_summary  # scripts/ci_summary.py
+
 ROOT = Path(__file__).resolve().parents[1]
 OPERATOR = {"Authorization": "Bearer msg-ops-demo"}
 SECURITY = {"Authorization": "Bearer msg-security-demo"}
 ROWS: list[tuple[str, str]] = []
 
 
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+def free_ports(count: int) -> list[int]:
+    """Distinct free loopback ports: every socket stays bound until all are chosen."""
+    with contextlib.ExitStack() as stack:
+        sockets = [stack.enter_context(socket.socket()) for _ in range(count)]
+        for sock in sockets:
+            sock.bind(("127.0.0.1", 0))
+        return [sock.getsockname()[1] for sock in sockets]
 
 
 def wait_until_up(url: str, process: subprocess.Popen[bytes], seconds: float = 30) -> None:
@@ -60,6 +65,13 @@ def wait_until_up(url: str, process: subprocess.Popen[bytes], seconds: float = 3
     raise RuntimeError(f"{url} did not come up within {seconds} s")
 
 
+def root_cause(exc: BaseException) -> BaseException:
+    """The MCP client runs in a task group, which wraps a failed step in an ExceptionGroup."""
+    while isinstance(exc, BaseExceptionGroup) and exc.exceptions:
+        exc = exc.exceptions[0]
+    return exc
+
+
 def check(step: str, condition: bool, observed: str) -> None:
     ROWS.append((step, observed))
     if not condition:
@@ -67,110 +79,103 @@ def check(step: str, condition: bool, observed: str) -> None:
 
 
 class Agent:
-    def __init__(self, gateway: str) -> None:
-        self.url = f"{gateway}/mcp"
+    """One MCP session for the whole scenario, as an agent would keep it."""
+
+    def __init__(self, session: ClientSession) -> None:
+        self.session = session
 
     async def tools(self) -> list[str]:
-        async with self._session() as session:
-            return [tool.name for tool in (await session.list_tools()).tools]
+        return [tool.name for tool in (await self.session.list_tools()).tools]
 
     async def call(self, name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], bool]:
-        async with self._session() as session:
-            result = await session.call_tool(name, arguments)
-            return result.structured_content or {}, bool(result.is_error)
+        result = await self.session.call_tool(name, arguments)
+        return result.structured_content or {}, bool(result.is_error)
 
-    @contextlib.asynccontextmanager
-    async def _session(self):  # type: ignore[no-untyped-def]
-        http = create_mcp_http_client(headers=OPERATOR)
-        async with http, streamable_http_client(self.url, http_client=http) as streams:
-            async with ClientSession(streams[0], streams[1]) as session:
-                await session.initialize()
-                yield session
+
+@contextlib.asynccontextmanager
+async def connect(gateway: str):  # type: ignore[no-untyped-def]
+    http = create_mcp_http_client(headers=OPERATOR)
+    async with http, streamable_http_client(f"{gateway}/mcp", http_client=http) as streams:
+        async with ClientSession(streams[0], streams[1]) as session:
+            await session.initialize()
+            yield Agent(session)
 
 
 async def scenario(gateway: str, upstream: str) -> None:
-    agent = Agent(gateway)
-    rest = httpx.Client(base_url=gateway, timeout=15)
+    with httpx.Client(base_url=gateway, timeout=15) as rest:
+        async with connect(gateway) as agent:
+            listed = await agent.tools()
+            check("before sync", not any(name.startswith("notes.") for name in listed), f"agent sees {sorted(listed)}")
 
-    listed = await agent.tools()
-    check("before sync", not any(name.startswith("notes.") for name in listed), f"agent sees {sorted(listed)}")
+            denied = rest.post("/upstreams/up_notes/sync", headers=OPERATOR)
+            check("operator sync", denied.status_code == 403, f"HTTP {denied.status_code}")
+            synced = {item["tool"]: item["status"] for item in rest.post("/upstreams/up_notes/sync", headers=SECURITY).json()["results"]}
+            check("admin sync", synced == {"notes.search_notes": "pinned", "notes.export_notes": "pinned"}, json.dumps(synced))
 
-    denied = rest.post("/upstreams/up_notes/sync", headers=OPERATOR)
-    check("operator sync", denied.status_code == 403, f"HTTP {denied.status_code}")
-    synced = {item["tool"]: item["status"] for item in rest.post("/upstreams/up_notes/sync", headers=SECURITY).json()["results"]}
-    check("admin sync", synced == {"notes.search_notes": "pinned", "notes.export_notes": "pinned"}, json.dumps(synced))
+            clean, is_error = await agent.call("notes.search_notes", {"query": "rota"})
+            reached = "Sandra" in json.dumps(clean)
+            check(
+                "clean call",
+                clean.get("status") == "executed" and not is_error and reached,
+                f"{clean.get('status')}, isError={is_error}, " + ("note reached the agent" if reached else "note missing"),
+            )
 
-    clean, is_error = await agent.call("notes.search_notes", {"query": "rota"})
-    reached = "Sandra" in json.dumps(clean)
-    check(
-        "clean call",
-        clean.get("status") == "executed" and not is_error and reached,
-        f"{clean.get('status')}, isError={is_error}, " + ("note reached the agent" if reached else "note missing"),
-    )
+            blocked, is_error = await agent.call("notes.search_notes", {"query": "deploy"})
+            findings = sorted({item["type"] for item in blocked.get("findings", [])})
+            leaked = "id_rsa" in json.dumps(blocked)
+            check(
+                "injected output",
+                blocked.get("status") == "response_blocked" and is_error and not leaked
+                and {"instruction_override", "concealment", "secret_file_coaxing"} <= set(findings),
+                f"{blocked.get('status')}, isError={is_error}, findings={findings}, "
+                + ("the note's text reached the agent" if leaked else "text withheld"),
+            )
+            request = rest.get(f"/requests/{blocked['requestId']}", headers=OPERATOR).json()
+            check("operator view", request["execution_status"] == "output_withheld", f"execution_status={request['execution_status']}")
 
-    blocked, is_error = await agent.call("notes.search_notes", {"query": "deploy"})
-    findings = sorted({item["type"] for item in blocked.get("findings", [])})
-    leaked = "id_rsa" in json.dumps(blocked)
-    check(
-        "injected output",
-        blocked.get("status") == "response_blocked" and is_error and not leaked
-        and {"instruction_override", "concealment", "secret_file_coaxing"} <= set(findings),
-        f"{blocked.get('status')}, isError={is_error}, findings={findings}, "
-        + ("the note's text reached the agent" if leaked else "text withheld"),
-    )
-    request = rest.get(f"/requests/{blocked['requestId']}", headers=OPERATOR).json()
-    check("operator view", request["execution_status"] == "output_withheld", f"execution_status={request['execution_status']}")
+            held, is_error = await agent.call("notes.export_notes", {"destination": "archive"})
+            check("high-risk call", held.get("status") == "approval_required" and not is_error, f"{held.get('status')}")
 
-    held, is_error = await agent.call("notes.export_notes", {"destination": "archive"})
-    check("high-risk call", held.get("status") == "approval_required" and not is_error, f"{held.get('status')}")
+            httpx.post(f"{upstream}/rugpull", timeout=5).raise_for_status()
+            pulled, is_error = await agent.call("notes.search_notes", {"query": "rota"})
+            check(
+                "after rug pull",
+                pulled.get("status") == "denied" and is_error and "changed since it was pinned" in pulled.get("reason", ""),
+                f"{pulled.get('status')}: {pulled.get('reason')}",
+            )
+            listed = await agent.tools()
+            check("tool list", "notes.search_notes" not in listed, "notes.search_notes no longer listed")
 
-    httpx.post(f"{upstream}/rugpull", timeout=5).raise_for_status()
-    pulled, is_error = await agent.call("notes.search_notes", {"query": "rota"})
-    check(
-        "after rug pull",
-        pulled.get("status") == "denied" and is_error and "changed since it was pinned" in pulled.get("reason", ""),
-        f"{pulled.get('status')}: {pulled.get('reason')}",
-    )
-    listed = await agent.tools()
-    check("tool list", "notes.search_notes" not in listed, "notes.search_notes no longer listed")
-
-    resynced = {item["tool"]: item for item in rest.post("/upstreams/up_notes/sync", headers=SECURITY).json()["results"]}
-    quarantined = resynced["notes.search_notes"]
-    check(
-        "new sync",
-        quarantined["status"] == "quarantined" and quarantined.get("reason") == "rug_pull",
-        f"{quarantined['status']} ({quarantined.get('reason')}), changed {quarantined.get('changed_fields')}",
-    )
-    rug_pulls = [item for item in rest.get("/incidents", headers=OPERATOR).json() if "Rug pull" in item["summary"]]
-    check("incidents", len(rug_pulls) == 1, f"{len(rug_pulls)} rug-pull incident")
+            resynced = {item["tool"]: item for item in rest.post("/upstreams/up_notes/sync", headers=SECURITY).json()["results"]}
+            quarantined = resynced["notes.search_notes"]
+            check(
+                "new sync",
+                quarantined["status"] == "quarantined" and quarantined.get("reason") == "rug_pull",
+                f"{quarantined['status']} ({quarantined.get('reason')}), changed {quarantined.get('changed_fields')}",
+            )
+            rug_pulls = [item for item in rest.get("/incidents", headers=OPERATOR).json() if "Rug pull" in item["summary"]]
+            check("incidents", len(rug_pulls) == 1, f"{len(rug_pulls)} rug-pull incident")
 
 
 def write_summary(failed: bool) -> None:
     """Show the steps on the GitHub Actions run page, when running there."""
-    target = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not target:
-        return
     import importlib.metadata
 
-    lines = [
-        "### Proxy mode end to end",
-        "",
-        f"The poisoned example server and the gateway over HTTP, with MCP Python SDK {importlib.metadata.version('mcp')} as the agent.",
-        "",
-        "| Step | Observed |",
-        "| --- | --- |",
-    ]
-    lines += [f"| {step} | {observed.replace('|', '/')} |" for step, observed in ROWS]
-    lines += ["", "**FAILED** (server logs are in the job output)." if failed else "**All steps passed.**", ""]
-    with open(target, "a", encoding="utf-8") as summary:
-        summary.write("\n".join(lines) + "\n")
+    ci_summary.append(
+        "Proxy mode end to end",
+        "The poisoned example server and the gateway over HTTP, with MCP Python SDK "
+        f"{importlib.metadata.version('mcp')} as the agent.",
+        ["Step", "Observed"],
+        ROWS,
+        "**FAILED** (server logs are in the job output)." if failed else "**All steps passed.**",
+    )
 
 
 def main() -> int:
     import importlib.metadata
 
     with tempfile.TemporaryDirectory(prefix="gateway-e2e-") as tmp:
-        upstream_port, gateway_port = free_port(), free_port()
+        upstream_port, gateway_port = free_ports(2)
         upstream_url = f"http://127.0.0.1:{upstream_port}"
         gateway_url = f"http://127.0.0.1:{gateway_port}"
         config = json.loads((ROOT / "examples" / "upstreams.json").read_text(encoding="utf-8"))
@@ -184,42 +189,40 @@ def main() -> int:
             "MSG_UPSTREAMS": str(upstreams),
             "MSG_DATABASE_URL": f"sqlite:///{(Path(tmp) / 'gateway.db').as_posix()}",
         }
-        logs = {name: open(Path(tmp) / f"{name}.log", "wb") for name in ("upstream", "gateway")}  # noqa: SIM115
-        processes = {
-            "upstream": subprocess.Popen(
-                [sys.executable, "-c",
-                 "import sys, uvicorn; sys.path.insert(0, 'examples'); import poisoned_server; "
-                 f"uvicorn.run(poisoned_server.app, host='127.0.0.1', port={upstream_port}, log_level='warning')"],
-                cwd=ROOT, env=env, stdout=logs["upstream"], stderr=subprocess.STDOUT,
-            ),
-            "gateway": subprocess.Popen(
-                [sys.executable, "-m", "uvicorn", "mcp_security_gateway.main:app",
-                 "--host", "127.0.0.1", "--port", str(gateway_port), "--log-level", "warning"],
-                cwd=ROOT, env=env, stdout=logs["gateway"], stderr=subprocess.STDOUT,
-            ),
-        }
+        processes: dict[str, subprocess.Popen[bytes]] = {}
         failed = False
-        try:
-            wait_until_up(f"{upstream_url}/mcp", processes["upstream"])
-            wait_until_up(f"{gateway_url}/health", processes["gateway"])
-            asyncio.run(scenario(gateway_url, upstream_url))
-        except Exception as exc:  # report, then show the server logs
-            failed = True
-            print(f"FAILED: {exc}")
-        finally:
-            for process in processes.values():
-                process.terminate()
-                with contextlib.suppress(subprocess.TimeoutExpired):
-                    process.wait(timeout=10)
-            for log in logs.values():
-                log.close()
+        with contextlib.ExitStack() as stack:
+            logs = {name: stack.enter_context(open(Path(tmp) / f"{name}.log", "wb")) for name in ("upstream", "gateway")}
+            try:
+                processes["upstream"] = subprocess.Popen(
+                    [sys.executable, "-c",
+                     "import sys, uvicorn; sys.path.insert(0, 'examples'); import poisoned_server; "
+                     f"uvicorn.run(poisoned_server.app, host='127.0.0.1', port={upstream_port}, log_level='warning')"],
+                    cwd=ROOT, env=env, stdout=logs["upstream"], stderr=subprocess.STDOUT,
+                )
+                processes["gateway"] = subprocess.Popen(
+                    [sys.executable, "-m", "uvicorn", "mcp_security_gateway.main:app",
+                     "--host", "127.0.0.1", "--port", str(gateway_port), "--log-level", "warning"],
+                    cwd=ROOT, env=env, stdout=logs["gateway"], stderr=subprocess.STDOUT,
+                )
+                wait_until_up(f"{upstream_url}/mcp", processes["upstream"])
+                wait_until_up(f"{gateway_url}/health", processes["gateway"])
+                asyncio.run(scenario(gateway_url, upstream_url))
+            except Exception as exc:  # report, then show the server logs
+                failed = True
+                print(f"FAILED: {root_cause(exc)}")
+            finally:
+                for process in processes.values():
+                    process.terminate()
+                    with contextlib.suppress(subprocess.TimeoutExpired):
+                        process.wait(timeout=10)
         width = max((len(step) for step, _ in ROWS), default=0)
         print(f"MCP Python SDK {importlib.metadata.version('mcp')}, gateway {gateway_url}, upstream {upstream_url}")
         for step, observed in ROWS:
             print(f"  {step:<{width}}  {observed}")
         write_summary(failed)
         if failed:
-            for name in logs:
+            for name in ("upstream", "gateway"):
                 print(f"--- {name} log ---")
                 print((Path(tmp) / f"{name}.log").read_text(encoding="utf-8", errors="replace")[-4000:])
             return 1

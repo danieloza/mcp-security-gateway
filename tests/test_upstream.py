@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from mcp_security_gateway.injection import text_findings
 from mcp_security_gateway.main import create_app
 from mcp_security_gateway.repository import SQLiteRepository
+from mcp_security_gateway.services import AuthContext, GatewayService
 from mcp_security_gateway.state import InMemoryRateLimitStore
 from mcp_security_gateway.upstream import (
     MAX_RESPONSE_BYTES,
@@ -125,6 +126,20 @@ def test_injected_output_is_withheld(tmp_path: Path) -> None:
     assert request["status"] == "executed"
     assert request["execution_status"] == "output_withheld"
 
+
+def test_withheld_output_counts_as_an_execution(tmp_path: Path) -> None:
+    """Behind the status checks, the execution guard itself refuses a second run."""
+    repo = SQLiteRepository(f"sqlite:///{tmp_path / 'gateway.db'}")
+    registry = UpstreamRegistry({CONFIG.id: (CONFIG, fixture_upstream())})
+    client = TestClient(create_app(repo, InMemoryRateLimitStore(), upstreams=registry))
+    sync(client)
+    request_id = call(client, "notes.search_notes", {"query": "deploy"})["structuredContent"]["requestId"]
+    service = GatewayService(repo, InMemoryRateLimitStore(), upstreams=registry)
+    auth = AuthContext(repo.get_user("usr_ops"))
+    request = service.get_request(auth, request_id)
+    assert request.execution_status == "output_withheld"
+    with pytest.raises(PermissionError, match="already been executed"):
+        service._execute(auth, request, {"query": "deploy"})
 
 def test_secrets_in_clean_output_are_redacted(tmp_path: Path) -> None:
     upstream = fixture_upstream()

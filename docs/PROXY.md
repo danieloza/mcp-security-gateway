@@ -132,7 +132,7 @@ example server in memory. They cover:
   no forwarded `Authorization`;
 - each injection pattern.
 
-`python scripts/mutation_check.py proxy` removes each of ten proxy guards in
+`python scripts/mutation_check.py proxy` removes each of eleven proxy guards in
 turn and expects a failing test every time. CI runs it on every pull request.
 
 [`scripts/e2e_proxy.py`](../scripts/e2e_proxy.py) repeats the run above over real HTTP,

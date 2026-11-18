@@ -367,8 +367,10 @@ function renderUpstreams() {
 function renderSyncResults(sync, upstream) {
   const list = document.createElement("div");
   list.className = "sync-results";
-  const when = new Date(sync.at);
-  list.append(textElement("p", `Last sync at ${Number.isNaN(when.getTime()) ? sync.at : when.toLocaleTimeString()}`, "sync-when"));
+  // The server sends microseconds; Date parsing is only specified for milliseconds.
+  const when = new Date(String(sync.at).replace(/(\.\d{3})\d+/, "$1"));
+  const shown = Number.isNaN(when.getTime()) ? sync.at : when.toLocaleString();
+  list.append(textElement("p", `Last sync at ${shown}`, "sync-when"));
   const trustNow = new Map(upstream.tools.map((tool) => [tool.name, tool.trust_status]));
   const expected = { pinned: "verified", unchanged: "verified", quarantined: "quarantined" };
   sync.results.forEach((item) => {

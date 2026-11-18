@@ -12,10 +12,11 @@ Run from the repository root, in the project's environment:
 
 from __future__ import annotations
 
-import os
 import pathlib
 import subprocess
 import sys
+
+import ci_summary  # scripts/ci_summary.py
 
 MAIN = "src/mcp_security_gateway/main.py"
 OAUTH = "src/mcp_security_gateway/oauth.py"
@@ -66,6 +67,9 @@ SUITES: dict[str, tuple[str, list[tuple[str, str, list[tuple[str, str]]]]]] = {
             ]),
             ("withheld output shown to operators as a plain execution", SERVICES, [
                 ('("output_withheld" if withheld else "executed") if succeeded', '"executed" if succeeded'),
+            ]),
+            ("withheld output may be executed again", SERVICES, [
+                ('{"executed", "output_withheld", "failed"}', '{"executed", "failed"}'),
             ]),
         ],
     ),
@@ -151,15 +155,9 @@ def run_suite(name: str, rows: list[tuple[str, str, str]]) -> int:
 
 def write_summary(rows: list[tuple[str, str, str]], survived: int) -> None:
     """Show the result on the GitHub Actions run page, when running there."""
-    target = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not target:
-        return
-    lines = ["### Mutation check", "", "| Suite | Guard removed | Result |", "| --- | --- | --- |"]
-    lines += [f"| {suite} | {guard} | {status} |" for suite, guard, status in rows]
     caught = len(rows) - survived
-    lines += ["", f"**{caught} of {len(rows)} mutations caught.**" if survived == 0 else f"**{survived} of {len(rows)} not caught.**", ""]
-    with open(target, "a", encoding="utf-8") as summary:
-        summary.write("\n".join(lines) + "\n")
+    verdict = f"**{caught} of {len(rows)} mutations caught.**" if survived == 0 else f"**{survived} of {len(rows)} not caught.**"
+    ci_summary.append("Mutation check", "", ["Suite", "Guard removed", "Result"], rows, verdict)
 
 
 def main(argv: list[str]) -> int:

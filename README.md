@@ -530,7 +530,7 @@ server in memory. [docs/OAUTH.md](docs/OAUTH.md#tests) and
 
 `scripts/mutation_check.py` checks that the tests protect each guard. It
 removes one guard at a time, runs the matching test file, and restores the
-source byte for byte. There are ten mutations for proxy mode and nine for OAuth
+source byte for byte. There are eleven mutations for proxy mode and nine for OAuth
 mode, and each one must make a test fail:
 
 ```powershell
