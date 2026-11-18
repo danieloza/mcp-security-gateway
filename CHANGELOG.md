@@ -2,6 +2,18 @@
 
 Significant changes to the MCP Security Gateway are documented here.
 
+## [Unreleased]
+
+### Dependencies
+
+- **Keycloak 26.4.5 → 26.8.2-2** in the compose profile `oauth` (#12). The
+  realm imports without errors, and the OAuth walkthrough gives the same
+  results.
+- **`actions/setup-python` 7.0.0 → 7.1.0** in CI (#11).
+- **Upper bounds raised to `redis<9` and `pytest<10`** (#13). CI passes with
+  redis-py 8.1.0 and pytest 9.2.0, and the Docker smoke test runs the gateway
+  against Redis with redis-py 8.1.0.
+
 ## [0.4.0] - 2026-11-18
 
 ### Breaking change
