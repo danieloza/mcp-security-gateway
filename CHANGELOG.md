@@ -2,7 +2,17 @@
 
 Significant changes to the MCP Security Gateway are documented here.
 
-## [Unreleased]
+## [0.4.0] - 2026-11-18
+
+### Breaking change
+
+- **Production mode requires OAuth.** With `MSG_ENVIRONMENT=production`, the
+  gateway refuses to start unless `MSG_AUTH_MODE=oauth`. Static mode accepts
+  only the seeded demo keys, which are published in the README, so v0.3.0 in
+  production mode accepted publicly known credentials. To upgrade a production
+  deployment, configure an authorization server first (see
+  [docs/OAUTH.md](docs/OAUTH.md)). Local and demo runs are unchanged:
+  static mode stays the default.
 
 ### Proxy mode for upstream MCP servers
 
@@ -20,66 +30,144 @@ Significant changes to the MCP Security Gateway are documented here.
 - **Output inspection.** Tool output that looks like instructions to the agent
   is withheld (`response_blocked`, with the finding types and a digest). The
   checks are heuristics, and the README says so.
+- **Withheld output is visible to operators.** Such a request has the
+  execution status `output_withheld`, not `executed`, and **Live traffic**
+  shows it in red.
+- **Sync results are dated.** The console shows when the last sync ran. When a
+  later call quarantines a tool, the row says so ("since then: quarantined").
 - **Quarantined tools no longer appear in `tools/list`.**
-- **A minimal upstream client** on `httpx`: no redirects, a 1 MiB cap, a timeout,
-  JSON and SSE answers, and never the caller's credentials. An unreachable
-  upstream fails closed.
+- **A minimal upstream client** on `httpx`: no redirects, a 1 MiB cap, a
+  timeout, JSON and SSE answers, and never the caller's credentials. An
+  unreachable upstream fails closed.
 - **`examples/poisoned_server.py`:** a deliberately malicious MCP server for
-  demos (test fixture).
-- **New runtime dependency:** `httpx`.
-- **Tests:** 28 proxy tests (122 in all), and 9 of 9 mutations caught.
+  demos and tests.
 
 ### OAuth resource-server mode
 
-- `MSG_AUTH_MODE=oauth` turns the gateway into an OAuth 2.1 resource server, as
-  MCP 2025-11-25 authorization describes it:
-  - **metadata:** RFC 9728 protected-resource metadata at
-    `/.well-known/oauth-protected-resource/mcp`;
-  - **`401`** with `WWW-Authenticate: Bearer`, `resource_metadata` and `scope`;
-  - **`403`** with `insufficient_scope`;
-  - **token checks:** the signature against the authorization server's JWKS,
-    with asymmetric algorithms only; then `iss`, `exp`, `nbf` and `sub`, and an
-    `aud` that must contain the resource URI (RFC 8707);
-  - **subjects:** each token subject is mapped explicitly to a gateway user. An
-    unknown subject is refused.
-- the scopes are `mcp:tools` for `/mcp` and `gateway:console` for the operator
-  API;
-- static mode is unchanged and stays the default. Production refuses to start in
-  static mode;
-- unavailable signing keys answer `503`, not `401`;
-- a local Keycloak realm, in the compose profile `oauth`, issues scripted demo
-  tokens;
-- new dependency: `PyJWT[crypto]`;
-- 31 OAuth tests (94 in all), with tokens signed by keys generated during the
-  test run.
+- **`MSG_AUTH_MODE=oauth`** turns the gateway into an OAuth 2.1 resource server,
+  as MCP 2025-11-25 authorization describes it.
+- **Metadata:** RFC 9728 protected-resource metadata at
+  `/.well-known/oauth-protected-resource/mcp`.
+- **Challenges:** `401` with `WWW-Authenticate: Bearer`, `resource_metadata` and
+  `scope`, and `403` with `insufficient_scope`.
+- **Token checks:** the signature against the authorization server's JWKS, with
+  asymmetric algorithms only; then `iss`, `exp`, `nbf` and `sub`, and an `aud`
+  that must contain the resource URI (RFC 8707).
+- **Subjects:** each token subject is mapped explicitly to a gateway user. An
+  unknown subject is refused.
+- **Scopes:** `mcp:tools` for `/mcp`, and `gateway:console` for the operator
+  API.
+- **Unavailable signing keys** answer `503`, not `401`.
+- **`/health`** reports the active `auth_mode`.
+- **A local Keycloak realm**, in the compose profile `oauth`, issues scripted
+  demo tokens.
 
 ### Client verification
 
-- ran the README's client instructions against a local gateway on a fresh
-  database. The MCP Python SDK 2.3.0 got all three decisions (`executed`,
-  `approval_required`, `denied`). Claude Code 2.1.248 reported `✔ Connected`
-  after a full handshake. Cursor and VS Code stay marked as not run;
-- documented the Claude Code handshake: its `server/discover` probe for
+- **The README's client instructions were run** against a local gateway on a
+  fresh database. The MCP Python SDK 2.3.0 got all three decisions
+  (`executed`, `approval_required`, `denied`). Claude Code 2.1.248 reported
+  `✔ Connected` after a full handshake. Cursor and VS Code stay marked as not
+  run.
+- **The Claude Code handshake is documented.** Its `server/discover` probe for
   revision `2026-07-28` is refused with `400`, and it falls back to
-  `initialize` at `2025-11-25`;
-- added a test that pins that refusal and the fallback (63 tests).
+  `initialize` at `2025-11-25`. A test pins the refusal and the fallback.
 
 ### Operator console
 
-- replace the sidebar with a module launcher: one tile per module, following
-  the dotted-card pattern with a corner icon on hover, each showing a live
-  status (requests and blocks, verified manifests, pending approvals, last
-  Attack Lab score, last evidence chain);
-- open each module on its own screen with an **All modules** back button;
-  `Esc`, browser Back and Forward, and direct links such as `#traffic` work;
-- move the credential field to the top bar so roles can be switched from any
-  module, and move focus to the module heading when a module opens;
-- add a brand favicon as a `data:` URI, removing the `favicon.ico` 404 from
-  the browser console;
-- add a test that every tile opens exactly one existing module (62 tests);
-- refreshed the product screenshots and demo GIF from a clean demo database:
-  the README hero is now the launcher with live status after the full
-  walkthrough, and each module frame shows the All modules bar.
+- **A module launcher replaces the sidebar.** There is one tile per module,
+  following the dotted-card pattern with a corner icon on hover. Each tile shows
+  a live status: requests and blocks, verified manifests, pending approvals, the
+  last Attack Lab score, or the last evidence chain.
+- **Each module opens on its own screen** with an **All modules** back button.
+  `Esc`, browser Back and Forward, and direct links such as `#traffic` work.
+- **The credential field is in the top bar,** so roles can be switched from any
+  module. Focus moves to the module heading when a module opens.
+- **A brand favicon** as a `data:` URI removes the `favicon.ico` 404 from the
+  browser console.
+- **Refreshed screenshots and demo GIF** from a clean demo database. The README
+  hero is now the launcher with live status after the full walkthrough, and
+  each module frame shows the All modules bar.
+
+### Documentation
+
+- **The README is shorter, and covers proxy and OAuth modes from the first
+  section on:**
+  - the overview;
+  - the execution flow;
+  - the API surface;
+  - the client decision table, which now includes `response_blocked`;
+  - a fifth Product Tour stop with a caught rug pull;
+  - a short summary of each mode.
+- **`docs/PROXY.md` and `docs/OAUTH.md`** hold the full reference for each
+  mode, moved out of the README. Each has a diagram: the path of a proxied call,
+  and the OAuth discovery and token checks.
+- **`docs/assets/proxy-mode-demo.gif`** shows proxy mode in the console, step by
+  step, and now opens the README.
+- **The other documents in `docs/` cover both modes:**
+  - the architecture;
+  - the threat model, with tool poisoning, rug pulls, output injection, token
+    passthrough and token audience;
+  - the case study;
+  - the API examples, with real gateway answers for a sync, a withheld output,
+    a rug pull and the OAuth challenge;
+  - the demo guide, with an optional act for the poisoned server.
+- **The README's Docker section** says what the stack runs with, what CI checks,
+  which findings have no fix yet, and that `docker compose down -v` deletes the
+  database volume.
+
+### Testing
+
+- **123 tests, up from 61.** The new ones are:
+  - 31 OAuth tests, with tokens signed by keys generated during the run;
+  - 29 proxy tests;
+  - a client-handshake test;
+  - a test that every console tile opens exactly one module.
+- **`scripts/mutation_check.py`** removes one guard at a time and checks that a
+  test fails. It caught 11 of 11 mutations for proxy mode and 9 of 9 for OAuth
+  mode. CI runs it on every pull request and on every push to `main`.
+- **`scripts/e2e_proxy.py`** runs proxy mode end to end over real HTTP, with
+  the MCP Python SDK as the agent: the poisoned example server and the gateway
+  as separate processes, every step asserted. CI runs it too.
+- **Both scripts write their results to the GitHub Actions run summary,** so a
+  run page shows each mutation and each end-to-end step.
+- **CI runs the tests and the dependency audit on Python 3.11 and 3.12.**
+- **CI builds, scans and starts the Docker image** (the `docker` job):
+  - Trivy fails the job on any HIGH or CRITICAL vulnerability that has a fix;
+  - `scripts/docker_smoke.py` checks `/health` and one MCP call against the
+    Compose stack.
+
+### Dependencies
+
+- **New runtime dependencies:**
+  - `httpx`, for the upstream client;
+  - `PyJWT[crypto]`, for token checks.
+- **New optional extra `e2e`:** `mcp`, the MCP Python SDK, used by
+  `scripts/e2e_proxy.py`.
+
+### Packaging
+
+- **The license is an SPDX expression** (`license = "MIT"` with
+  `license-files`), and the license classifier is gone. setuptools had
+  deprecated the old form, with builds to stop working from 2027-02-18. The
+  build now requires setuptools 77 or later.
+- **The Docker image ships the license file.** The Dockerfile did not copy
+  `LICENSE`, so the installed package had no license text.
+- **`docker compose up` starts again.** Redis runs as its own user. With all
+  capabilities dropped, its image could no longer switch to that user from
+  root, and the stack stopped at "dependency redis failed to start".
+- **The image is patched and smaller.** Debian security updates are applied at
+  build time, and pip, setuptools and wheel are removed after the install. The
+  base image carried fixable HIGH findings in zlib and in setuptools and its
+  vendored packages. Trivy now reports no HIGH or CRITICAL finding that has a
+  fix. 47 HIGH findings remain in Debian packages for which Debian has no fix
+  yet, and the README lists them.
+
+### Maintenance
+
+- **Dependabot proposes weekly updates** for pip, GitHub Actions, the base image
+  and the Compose images. Each update waits 7 days after its release. Python
+  minor versions and Compose major versions are left to a person.
 
 ## [0.3.0] - 2026-10-20
 

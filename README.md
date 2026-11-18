@@ -3,36 +3,46 @@
 > Protocol-aware runtime firewall for verified MCP tool execution.
 
 [![CI](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/danieloza/mcp-security-gateway/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/badge/Release-v0.3.0-22C55E?style=for-the-badge)](https://github.com/danieloza/mcp-security-gateway/releases/tag/v0.3.0)
+[![Release](https://img.shields.io/badge/Release-v0.4.0-22C55E?style=for-the-badge)](https://github.com/danieloza/mcp-security-gateway/releases/tag/v0.4.0)
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-62_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-123_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
-[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
+[Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [Proxy Mode](#proxy-mode-real-mcp-servers-behind-the-gateway) · [OAuth](#oauth-resource-server-mode) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
 
-![MCP Security Gateway module launcher with live status for each module](docs/assets/gateway-dashboard.png)
+![Proxy mode in the console: an upstream server synced, three agent calls, a rug pull blocked, and the diff with its hidden text decoded](docs/assets/proxy-mode-demo.gif)
+
+*A deliberately malicious MCP server behind the gateway. Its tools are pinned
+on review, its injected output never reaches the agent, and a description it
+swaps after review is blocked on the next call. See
+[Proxy Mode](#proxy-mode-real-mcp-servers-behind-the-gateway).*
 
 ## What It Solves
 
 Agents can discover powerful MCP tools, but discovery is not authorization. A
 production control point must determine:
 
-- which workload and tenant initiated the call;
+- which workload and tenant initiated the call, and whether its token was
+  issued for this gateway;
 - whether the server, tool description, and JSON schema still match an approved
-  manifest;
+  manifest, at review time and at the moment of the call;
 - whether the requested scope and arguments fit policy;
 - whether secrets or forbidden destinations appear in the call;
 - whether a human must approve the exact payload;
 - whether the approved call was modified, replayed, or executed twice;
+- whether the tool's output is trying to instruct the agent;
 - what evidence proves the final outcome.
 
-MCP Security Gateway places that control point between an MCP client and a fixed
-tool execution adapter. It supports protocol-level `initialize`, `ping`,
-`tools/list`, and `tools/call`, then applies deterministic controls before any
-side effect.
+MCP Security Gateway places that control point between an MCP client and the
+tools it calls: a fixed built-in execution adapter, or real MCP servers behind
+the gateway in [proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway). It supports
+protocol-level `initialize`, `ping`, `tools/list`, and `tools/call`, then
+applies deterministic controls before any side effect. Callers authenticate
+with public demo keys or, in [OAuth mode](#oauth-resource-server-mode), with access tokens from an
+external authorization server.
 
 ## Product Demo
 
@@ -62,12 +72,16 @@ flowchart LR
   Transport --> Identity["Workload identity"]
   Identity --> Manifest["Pinned tool manifest"]
   Manifest --> Policy["Scope + DLP + rate + environment policy"]
-  Policy -->|low risk| Execute["Controlled execution adapter"]
+  Policy -->|low risk| Execute["Execution"]
   Policy -->|high risk| Approval["Maker-checker approval"]
   Approval --> Lease["One-time capability lease"]
   Lease --> Execute
   Policy -->|deny| Incident["Incident"]
-  Execute --> Evidence["HMAC-chained evidence"]
+  Execute --> Adapter["Built-in adapter"]
+  Execute -->|pin re-checked| Upstream["Upstream MCP server"]
+  Upstream --> Inspect["Output inspection"]
+  Adapter --> Evidence["HMAC-chained evidence"]
+  Inspect --> Evidence
 ```
 
 Every governed request records:
@@ -92,7 +106,8 @@ Every governed request records:
 
 The values in [Demo credentials](#demo-credentials) are intentionally public
 portfolio credentials, not secrets. They exist only to make the local walkthrough
-repeatable.
+repeatable. In [OAuth mode](#oauth-resource-server-mode) they are refused, and callers present
+audience-bound access tokens instead. Production mode requires OAuth mode.
 
 ### Tool Manifest Trust
 
@@ -103,6 +118,12 @@ must explicitly restore its trust state.
 
 MCP tool annotations are retained for interoperability and operator context, but
 the gateway does not treat server-provided hints as authorization.
+
+For upstream servers in [proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway), the gateway
+also re-reads each tool's definition on every call and again just before
+forwarding, quarantines a new tool whose definition already carries hidden
+instructions, and withholds tool output that reads like instructions to the
+agent.
 
 ### Approval-bound capability leases
 
@@ -138,6 +159,8 @@ the lab fails when argument DLP or execution binding is disabled.
 
 ## Operator Console
 
+![MCP Security Gateway module launcher with live status for each module](docs/assets/gateway-dashboard.png)
+
 The dashboard opens on a module launcher: one tile per module, each with a live
 status such as pending approvals or the last Attack Lab score. A tile opens that
 module on its own screen; **All modules**, `Esc`, or the browser Back button
@@ -149,7 +172,8 @@ The modules provide:
 
 - live MCP policy and execution traffic, with the decision reason on every row
   and an expandable trace of each policy control;
-- tool trust registry with manifest fingerprints;
+- tool trust registry with manifest fingerprints, and **Sync upstream** with
+  the pinned and served descriptions side by side;
 - maker-checker approval workbench that shows the tool, justification, and
   redacted payload being approved;
 - maker-only lease claim and execution without browser persistence;
@@ -201,12 +225,24 @@ The evidence explorer links the policy decision, the checker's approval, the
 maker's lease claim, and the execution, and verifies the organization audit
 chain before presenting the evidence-pack digest.
 
+### 5. A poisoned upstream server caught
+
+![A rug pull caught by the gateway: the pinned description next to the poisoned one the upstream serves now, with its hidden text decoded](docs/assets/upstream-rug-pull.jpg)
+
+In [proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway) the gateway pins each upstream
+tool on review. When the server later swaps a description, the next call is
+blocked and the tool quarantined. **Tool trust** shows the pinned description
+next to the one the server serves now, and decodes the instructions hidden in
+invisible Unicode tag characters.
+
 ## API Surface
 
 ### MCP protocol boundary
 
 - `POST /mcp` — `initialize`, `ping`, `tools/list`, `tools/call`, and
   `notifications/*` (see [Connect Your Client](#connect-your-client))
+- `GET /.well-known/oauth-protected-resource/mcp` — RFC 9728
+  protected-resource metadata, in [OAuth mode](#oauth-resource-server-mode) only
 
 ### Operator API
 
@@ -217,6 +253,8 @@ chain before presenting the evidence-pack digest.
 - `GET /tool-registry`
 - `POST /tool-registry/{tool_id}/verify`
 - `POST /tool-registry/{tool_id}/restore`
+- `GET /upstreams`
+- `POST /upstreams/{server_id}/sync`
 - `GET /requests`
 - `GET /requests/{request_id}`
 - `POST /requests`
@@ -281,7 +319,8 @@ sees every governance decision as a normal tool result:
 | --- | --- | --- |
 | verified low-risk call | `executed` | `false` |
 | high-risk call held for maker-checker | `approval_required` | `false` |
-| policy violation (secret, scope, traversal, production admin) | `denied` | `true` |
+| policy violation (secret, scope, traversal, production admin, changed upstream tool) | `denied` | `true` |
+| upstream tool output that reads like instructions to the agent ([proxy mode](#proxy-mode-real-mcp-servers-behind-the-gateway)) | `response_blocked` | `true` |
 
 ### Claude Code
 
@@ -375,178 +414,62 @@ see the next section.
 
 ## OAuth Resource-Server Mode
 
-With `MSG_AUTH_MODE=oauth`, the gateway is an OAuth 2.1 resource server as the
-MCP 2025-11-25 authorization specification describes it:
+With `MSG_AUTH_MODE=oauth`, the gateway is an OAuth 2.1 resource server, as
+MCP 2025-11-25 authorization describes it. It validates access tokens from an
+external authorization server, and never issues them:
 
-- **It validates tokens. It does not issue them.** The tokens come from an
-  external authorization server.
-- **It publishes RFC 9728 protected-resource metadata** at
-  `/.well-known/oauth-protected-resource/mcp`. This is the path-inserted URI
-  for a resource at `<origin>/mcp`.
-- **A missing or invalid token is a `401`.** The response carries
-  `WWW-Authenticate: Bearer` with `resource_metadata` and `scope`, and
-  `error="invalid_token"` when a token was sent.
-- **A token without the needed scope is a `403`** with
-  `error="insufficient_scope"`. The scope is `mcp:tools` for `/mcp` and
-  `gateway:console` for the operator API.
-- **Tokens are checked against the authorization server's JWKS:**
-  - the signature, with asymmetric algorithms only, so `none` and HS256 are
-    refused;
-  - `iss`, `exp`, `nbf` and `sub`;
-  - **`aud`, which must contain the gateway's resource URI** (RFC 8707). A
-    token minted for another resource is refused.
-- **A token's `sub` must be mapped explicitly to a gateway user.** An unknown
-  subject is refused, never created.
-- **The token goes no further than authentication.** Tool execution sees only
-  the mapped user, so a client's token is never passed through.
-- **The static demo keys and `X-API-Key` are not accepted** in this mode.
-- **Production refuses to start in static mode.**
+- **Discovery.** It publishes RFC 9728 protected-resource metadata at
+  `/.well-known/oauth-protected-resource/mcp`, and a `401` challenge points to
+  it.
+- **Signatures.** They are checked against the authorization server's JWKS,
+  with asymmetric algorithms only.
+- **Claims.** `iss`, `exp`, `nbf` and `sub` are checked, and `aud` must name
+  the gateway (RFC 8707).
+- **Scopes.** A missing scope gets `403 insufficient_scope`.
+- **Subjects.** Each token subject maps explicitly to a gateway user.
+- **Boundaries.** The token is never passed through, and the static demo keys
+  are refused. Production refuses to start in static mode.
 
-| Variable | Example (local Keycloak realm) |
-| --- | --- |
-| `MSG_AUTH_MODE` | `oauth` |
-| `MSG_OAUTH_RESOURCE` | `http://127.0.0.1:8000/mcp` |
-| `MSG_OAUTH_ISSUER` | `http://127.0.0.1:8081/realms/gateway` |
-| `MSG_OAUTH_JWKS_URL` | `http://127.0.0.1:8081/realms/gateway/protocol/openid-connect/certs` |
-| `MSG_OAUTH_SUBJECTS` | `5f6c1d2e-0a41-4f43-9a0b-6e1d7c2a9b01=usr_ops,8a3e4b7c-2d19-4c55-b1e2-3f9a0d6c4e02=usr_security` |
-| `MSG_OAUTH_ALGORITHMS` | optional, default `RS256,ES256` |
+It has been run against a local Keycloak 26.4.5 realm from the compose profile
+`oauth`. **[docs/OAUTH.md](docs/OAUTH.md)** has:
 
-### Try it with a local Keycloak
-
-```powershell
-docker compose --profile oauth up keycloak
-# in another shell, with the variables above set:
-python -m uvicorn mcp_security_gateway.main:app --host 127.0.0.1 --port 8000
-
-$token = (Invoke-RestMethod -Method Post `
-  -Uri http://127.0.0.1:8081/realms/gateway/protocol/openid-connect/token `
-  -Body @{ grant_type = "password"; client_id = "gateway-demo-cli";
-           username = "ops"; password = "ops-demo"; scope = "mcp:tools" }).access_token
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/mcp `
-  -Headers @{ Authorization = "Bearer $token" } -ContentType "application/json" `
-  -Body '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
-
-**About the realm** (`deploy/keycloak/gateway-realm.json`):
-- its users have fixed ids, so the subject map above stays stable;
-- each scope carries an audience mapper that puts the resource URI in `aud`;
-- its users, passwords and the password grant are public, local-only fixtures for
-  scripted tokens. Interactive MCP clients use the authorization code flow with
-  PKCE.
-
-**As run on 2026-11-17** against Keycloak 26.4.5 with this realm, on a fresh
-database:
-- the metadata document and the 401 challenge were as described above;
-- an `ops` token with `mcp:tools` got `tools/list`, `kb.search` → `executed` and
-  `repo.write_file` → `approval_required`;
-- the same token on the console API got `403 insufficient_scope`;
-- with `gateway:console` tokens, the maker could not approve their own request
-  (`403`), and `security` could;
-- the static demo key got `401 invalid_token`.
-
-**Claude Code 2.1.248**, pointed at the gateway in this mode without a header,
-read the 401 challenge, fetched the metadata, found the Keycloak realm and tried
-dynamic client registration. The realm's "Trusted Hosts" policy refused it: the
-realm only issues scripted tokens. An interactive login from an MCP client
-needs an authorization server that accepts its registration.
-
-**Not part of this mode:**
-- the gateway as an authorization server;
-- dynamic client registration;
-- token exchange;
-- a console login.
+- the configuration;
+- a walkthrough with scripted tokens;
+- what was observed, including Claude Code's discovery attempt;
+- what this mode does not include.
 
 ## Proxy Mode: Real MCP Servers Behind the Gateway
 
 The gateway can sit in front of real MCP servers that speak Streamable HTTP.
-Agents connect to the gateway only. Every call to an upstream tool goes through
-the same path as a built-in one: identity, manifest pin, scope, rate limit,
-argument DLP, risk, maker-checker approval, one-time lease, and evidence. Then it
-is forwarded.
+Agents connect to the gateway only. Every upstream call goes through the same
+control path as a built-in one before it is forwarded. On top of that, the
+gateway:
 
-![A rug pull caught by the gateway: the pinned description next to the poisoned one the upstream serves now, with its hidden text decoded](docs/assets/upstream-rug-pull.jpg)
+- **pins each upstream tool on review,** and quarantines a new tool whose
+  definition already hides instructions;
+- **re-checks the definition on every call** and again just before
+  forwarding, so it catches a rug pull even between approval and execution;
+- **withholds output** that reads like instructions to the agent
+  (`response_blocked`);
+- **lists only verified tools,** and never passes the caller's credentials
+  upstream.
 
-**What the gateway adds for upstream servers:**
-
-- **Pinning on review.** A security or platform admin runs
-  `POST /upstreams/{id}/sync`, or **Sync upstream** in the Tool trust module.
-  Each new tool is pinned under `<prefix>.<name>`: its name, description, input
-  schema and annotations. A new tool whose description already carries hidden
-  instructions is quarantined on first sight ("tool poisoning").
-- **Rug-pull detection, twice per call.** The gateway re-reads the upstream's
-  definition of a tool on every call, and again just before forwarding.
-  - A changed definition quarantines the tool and blocks the call. So does a
-    change between approval and execution.
-  - The console shows the pinned and served descriptions side by side. Text
-    hidden in Unicode tag characters is decoded, and other invisible characters
-    are shown as code points.
-- **Output inspection.** Before a tool's output reaches the agent, it is checked
-  for:
-  - invisible or tag characters;
-  - instruction overrides;
-  - concealment ("do not tell the user");
-  - coaxing towards secret files such as `~/.ssh` or `mcp.json`;
-  - `<important>`-style blocks;
-  - redirection to other tools.
-
-  On a match, the agent gets `response_blocked` with the finding types and a
-  digest, never the text. An incident and an audit event are recorded. Secrets
-  in clean output are redacted, as for built-in tools.
-- **Quarantined tools are not listed.** `tools/list` shows verified tools only,
-  so a poisoned description never reaches the agent.
-- **A small upstream client of its own,** on `httpx`:
-  - it follows no redirects;
-  - it caps responses at 1 MiB and times out after 10 s;
-  - it reads JSON and SSE answers.
-
-  It never carries the caller's credentials, because it has no access to them.
-- **Fail closed.** An unreachable upstream blocks the call.
-
-**Configuration:** `MSG_UPSTREAMS` points to a JSON list, for example
-[`examples/upstreams.json`](examples/upstreams.json):
-- `id`, `name`, `url`, `prefix`, `organization_id`, `scope`;
-- `default_risk`, and per-tool `risk`.
-
-The operator configures upstreams. An agent can never add or address one.
-
-### Try it with the poisoned example server
-
-[`examples/poisoned_server.py`](examples/poisoned_server.py) is a deliberately
-malicious MCP server, a test fixture that runs on loopback and touches no file
-or network.
-- `search_notes` returns a note that tells the agent to read `~/.ssh/id_rsa`
-  and keep quiet.
-- `POST /rugpull` swaps its description for a poisoned one, with hidden tag
-  characters.
-- `export_notes` is configured as high-risk.
+The animation at the top of this page is this run, recorded in the console.
 
 ```powershell
-python examples/poisoned_server.py                      # :8100
+python examples/poisoned_server.py        # a deliberately malicious server on :8100
 $env:MSG_UPSTREAMS = "examples/upstreams.json"
 python -m uvicorn mcp_security_gateway.main:app --port 8000
 ```
 
-**As run on 2026-11-17,** with the MCP Python SDK 2.3.0 as the agent and a
-fresh database:
+**[docs/PROXY.md](docs/PROXY.md)** has:
 
-| Step | What the agent got |
-| --- | --- |
-| before any sync | only the built-in tools |
-| sync | `notes.search_notes` and `notes.export_notes` pinned |
-| `search_notes` "rota" | `executed`, with the note |
-| `search_notes` "deploy" | `response_blocked` (`instruction_override`, `concealment`, `secret_file_coaxing`); no trace of the note in the result |
-| `export_notes` | `approval_required` |
-| after `POST /rugpull`, no sync | `denied`: "upstream tool definition changed since it was pinned"; the tool quarantined |
-| sync again | `quarantined (rug_pull)` with the diff, and no second incident |
+- the configuration;
+- the example server;
+- a step-by-step run with the MCP Python SDK as the agent;
+- the limits.
 
-**These checks are patterns, not a proof.** A determined author can phrase an
-injection that none of these rules knows. A match withholds the text; the
-absence of a match only means none of these patterns was found.
-
-**Not covered:**
-- `stdio` upstreams;
-- upstream credentials;
-- server-to-client streams from upstreams.
+The checks are patterns, not a proof.
 
 ## Guided Demo
 
@@ -575,10 +498,33 @@ docker compose config --quiet
 docker compose up --build
 ```
 
-Compose binds the API to loopback, keeps Redis on the internal network, drops
-Linux capabilities, uses a non-root application user, and mounts only the
-persistent SQLite data volume. The local fallback audit key remains a
-development convenience; configure a managed secret for any non-local runtime.
+Compose sets up both containers like this:
+- the API is bound to loopback, and Redis stays on the internal network;
+- both containers drop every Linux capability;
+- the API runs as a non-root user with a read-only root filesystem, and mounts
+  only the persistent SQLite data volume;
+- Redis runs as its own user, so it needs no capability to switch users.
+
+The image holds only what the gateway needs at run time. Debian security
+updates are applied when it is built, and pip, setuptools and wheel are removed
+after the install. The local fallback audit key is still only a development
+convenience; configure a managed secret for any non-local runtime.
+
+**CI checks the image on every pull request** (the `docker` job):
+- it builds the image;
+- it scans it with Trivy, and fails on any HIGH or CRITICAL vulnerability that
+  has a fix;
+- it starts the image with Redis;
+- `scripts/docker_smoke.py` checks `/health` and one MCP call.
+
+**Some findings have no fix yet.** A scan on 2026-11-18 reported 47 HIGH and no
+CRITICAL findings for which Debian has no fix yet, in util-linux, ncurses,
+perl, systemd and SQLite libraries. Three of them are in `libsqlite3-0`, which
+the gateway uses.
+
+**`docker compose down -v` deletes the `gateway-data` volume and the gateway's
+database with it.** To stop the stack and keep the data, use
+`docker compose down`.
 
 ## Testing
 
@@ -599,21 +545,32 @@ isolation, Origin validation, strict request schemas, evidence integrity,
 single-source versioning, dashboard headers, and the absence of HTML sinks in
 the dashboard script.
 
-The OAuth tests (`tests/test_oauth.py`) sign tokens with keys generated during
-the test run, so they need no authorization server. They cover:
-- the metadata document and the `401` and `403` challenges;
-- each refused token:
-  - a wrong audience, or none;
-  - expired, or not yet valid;
-  - a wrong issuer;
-  - a bad signature, or an unknown key;
-  - `alg: none`, or HS256 with the public key as its secret;
-  - no subject, or an unknown one;
-  - a static key, or `X-API-Key`;
-- a missing scope;
-- maker-checker separation with OAuth identities;
-- unavailable signing keys (`503`);
-- the production guard, and unsafe settings.
+[`tests/test_oauth.py`](tests/test_oauth.py) signs tokens with keys generated
+during the run, so it needs no authorization server.
+[`tests/test_upstream.py`](tests/test_upstream.py) holds the poisoned example
+server in memory. [docs/OAUTH.md](docs/OAUTH.md#tests) and
+[docs/PROXY.md](docs/PROXY.md#tests) list what each one covers.
+
+`scripts/mutation_check.py` checks that the tests protect each guard. It
+removes one guard at a time, runs the matching test file, and restores the
+source byte for byte. There are eleven mutations for proxy mode and nine for OAuth
+mode, and each one must make a test fail:
+
+```powershell
+python scripts/mutation_check.py          # or: proxy, oauth
+```
+
+CI runs it on every pull request and on every push to `main`.
+
+`scripts/e2e_proxy.py` runs proxy mode end to end, over real HTTP. It starts
+the poisoned example server and the gateway on free loopback ports, uses the
+official MCP Python SDK as the agent, and asserts every step from the first sync
+to the rug pull. CI runs it too:
+
+```powershell
+python -m pip install -e ".[e2e]"
+python scripts/e2e_proxy.py
+```
 
 ## Production-shaped, Not Production-ready
 
@@ -651,6 +608,10 @@ See [Threat Model](docs/THREAT_MODEL.md) and
 - maker-checker approval: [docs/assets/approval-workbench.png](docs/assets/approval-workbench.png)
 - Attack Lab: [docs/assets/attack-lab.png](docs/assets/attack-lab.png)
 - evidence chain: [docs/assets/evidence-chain.png](docs/assets/evidence-chain.png)
+- caught upstream rug pull: [docs/assets/upstream-rug-pull.jpg](docs/assets/upstream-rug-pull.jpg)
+- proxy mode, step by step: [docs/assets/proxy-mode-demo.gif](docs/assets/proxy-mode-demo.gif)
+- proxy mode: [docs/PROXY.md](docs/PROXY.md)
+- OAuth resource-server mode: [docs/OAUTH.md](docs/OAUTH.md)
 - architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - threat model: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md)
 - API examples: [docs/API_EXAMPLES.md](docs/API_EXAMPLES.md)

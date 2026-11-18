@@ -1150,7 +1150,7 @@ class GatewayService:
         arguments: dict[str, Any],
     ) -> ExecutionRecord:
         self._validate_execution_binding(auth, request, arguments)
-        if request.execution_status in {"executed", "failed"}:
+        if request.execution_status in {"executed", "output_withheld", "failed"}:
             raise PermissionError("Request has already been executed.")
         started = perf_counter()
         try:
@@ -1190,12 +1190,14 @@ class GatewayService:
             created_at=utc_now_iso(),
         )
         succeeded = status == "succeeded"
+        # The tool ran, but the agent never saw its output: operators must see that too.
+        withheld = succeeded and bool(result.get("withheld"))
         self.repo.save_execution(execution)
         self.repo.update_request_status(
             request.organization_id,
             request.id,
             status="executed" if succeeded else "failed",
-            execution_status="executed" if succeeded else "failed",
+            execution_status=("output_withheld" if withheld else "executed") if succeeded else "failed",
         )
         payload: dict[str, Any] = {
             "execution_id": execution.id,

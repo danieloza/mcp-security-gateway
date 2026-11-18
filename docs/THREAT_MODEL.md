@@ -3,16 +3,18 @@
 ## Scope
 
 This model covers the portfolio runtime from the inbound MCP or operator API
-request through policy evaluation, approval, controlled execution, and evidence
-persistence.
+request through authentication, policy evaluation, approval, execution by the
+built-in adapter or a configured upstream MCP server, and evidence persistence.
 
-It does not cover a corporate identity provider, arbitrary third-party MCP
-servers, managed databases, production networks, or downstream business APIs.
+It does not cover the authorization server itself, a corporate identity
+provider, the internals of upstream MCP servers, managed databases, production
+networks, or downstream business APIs.
 
 ## Assets
 
 - workload and tenant identity;
-- tool manifests and trust status;
+- tool manifests and trust status, including upstream tool pins;
+- the OAuth resource identity (audience) and the subject map;
 - policy versions and decisions;
 - approval decisions and capability leases;
 - redacted request and execution evidence;
@@ -24,10 +26,15 @@ servers, managed databases, production networks, or downstream business APIs.
 
 - MCP clients, arguments, tool descriptions, annotations, and tool results are
   untrusted;
+- upstream MCP servers are untrusted. Their tool definitions can change at any
+  time, and their output can carry instructions aimed at the agent;
+- in OAuth mode, the configured authorization server and its JWKS endpoint are
+  trusted to issue tokens;
 - the local manifest registry and policy code are authoritative;
 - public demo credentials have no value outside the local portfolio runtime;
 - the controlled execution adapter has no shell, arbitrary filesystem, or
   network access;
+- the upstream client reaches only operator-configured URLs;
 - deployment infrastructure must protect environment variables and persistent
   volumes.
 
@@ -47,7 +54,7 @@ servers, managed databases, production networks, or downstream business APIs.
 | Privileged lease hijack | Approval returns no credential; only the maker can claim and execute a lease; platform administrators have no execution override | Database administrators remain privileged |
 | Theatrical security tests | Attack Lab replays each attack through the real gateway flow on an isolated replica; tests prove it fails when DLP or execution binding is disabled | The replica shares code, not live data, so tenant-specific drift is out of scope |
 | Secret exfiltration in arguments | Recursive secret-key/value detection, redaction, and hard block | Pattern detection cannot replace enterprise DLP |
-| SSRF to internal or metadata endpoints | No arbitrary outbound connector; flag non-global literal destinations, including decimal, hex, octal, and shortened IPv4 forms; fail closed on malformed numeric hosts | Future connector DNS resolution requires rebinding-safe egress enforcement |
+| SSRF to internal or metadata endpoints | No agent-controlled outbound connector; upstream URLs come only from operator configuration; flag non-global literal destinations, including decimal, hex, octal, and shortened IPv4 forms; fail closed on malformed numeric hosts | Future connector DNS resolution requires rebinding-safe egress enforcement |
 | MCP DNS rebinding | Validate browser Origin against an allowlist | Non-browser clients authenticate with Bearer credentials |
 | Header/body policy split | Reject mismatched `Mcp-Method` and `Mcp-Name` values | Upstream infrastructure must preserve the validated headers |
 | Request flooding | Bounded request size and Redis-backed caller rate limit | Edge-level connection and bandwidth controls remain necessary |
@@ -55,6 +62,15 @@ servers, managed databases, production networks, or downstream business APIs.
 | Audit record modification | HMAC-chained events and evidence verification | Local key and database share a runtime; external anchoring is not included |
 | Host filesystem modification | Fixed adapter only stages sandbox metadata; no shell execution; traversal, drive, stream, and non-allowlisted paths are rejected by policy before approval and again by the adapter | A future real connector needs separate process isolation |
 | Silent execution failure | Adapter failures are persisted as failed executions and HMAC-chained `tool_execution_failed` events | Failure reasons are redacted by pattern, not by a full DLP engine |
+| Tool poisoning: hidden instructions in a new upstream tool's definition | Pattern scan at sync; quarantine on first sight; quarantined tools are not listed to agents | Patterns, not a proof: a novel phrasing can pass review |
+| Upstream rug pull after review | Compare the served definition with the pin on every call and again just before forwarding; on a change, quarantine, deny and open an incident, also between approval and execution | Definitions are compared, not behavior: an upstream can still act differently from what it declares |
+| Prompt injection through tool output | Inspect upstream output before it reaches the agent; withhold it with finding types, a digest, an incident and an audit event; mark the request `output_withheld` | Patterns, not a proof: no match only means no known pattern was found |
+| Token passthrough to an upstream | The upstream client has no access to the caller's credentials and sends only protocol headers | Upstream credentials are not supported yet |
+| Hostile upstream answers | No redirects, a 1 MiB cap, a 10 s timeout; an unreachable upstream fails closed | No egress policy or rebinding-safe DNS for upstream hosts |
+| Token minted for another resource | `aud` must contain the gateway's resource URI (RFC 8707) | Depends on the authorization server setting the audience |
+| Algorithm confusion (`none`, HS256 with the public key) | Asymmetric allowlist, checked before any key lookup and again when decoding | Signature checks rely on PyJWT and `cryptography` |
+| Unknown or unmapped token subject | Explicit subject map; unknown subjects are refused, never created | The map is maintained by hand |
+| Public demo keys in production | Production mode refuses to start unless OAuth mode is on | The guard keys off `MSG_ENVIRONMENT=production`: a shared or staging deployment left on the default `local` still accepts the public keys |
 
 ## Security Invariants
 
@@ -67,19 +83,27 @@ servers, managed databases, production networks, or downstream business APIs.
 - approval and execution are tenant-bound;
 - manifest drift blocks execution once quarantined;
 - production administration never reaches the local adapter;
-- audit evidence contains redacted payloads and verifiable chain metadata.
+- audit evidence contains redacted payloads and verifiable chain metadata;
+- an upstream tool is forwarded only while its served definition matches its
+  pin;
+- a quarantined tool is never listed to an agent;
+- the caller's credential never leaves the gateway;
+- upstream output that matches an injection pattern never reaches the agent;
+- production never accepts the public demo keys.
 
 ## Production Requirements
 
 A production design would additionally require:
 
-- OAuth 2.1 resource-server validation and audience-bound short-lived tokens;
+- a corporate identity provider behind OAuth mode, with interactive clients
+  on the authorization code flow with PKCE, and short token lifetimes;
 - managed secrets and cryptographic key rotation;
 - PostgreSQL with migrations, backup, point-in-time recovery, and least-privilege
   roles;
 - managed Redis with high availability;
-- an allowlisted upstream connector with DNS resolution checks, egress firewall,
-  TLS validation, timeouts, and redirect controls;
+- egress policy and rebinding-safe DNS resolution for upstream hosts, TLS
+  validation, and upstream credentials from a secret store (the current client
+  already refuses redirects and caps size and time);
 - signed server onboarding and manifest releases;
 - sandboxed connector processes or containers;
 - centralized logs, metrics, traces, paging, and incident ownership;

@@ -839,6 +839,7 @@ tbody tr:hover {
 .badge-blocked,
 .badge-failed,
 .badge-denied,
+.badge-output_withheld,
 .badge-quarantined,
 .badge-not_executed,
 .badge-drift_detected {
@@ -1153,6 +1154,12 @@ tbody tr:hover {
   align-items: center;
   gap: 8px;
   font-size: 13px;
+}
+
+.sync-when {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .sync-reason,

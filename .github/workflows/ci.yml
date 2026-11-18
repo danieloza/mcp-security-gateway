@@ -12,6 +12,37 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Audit Python dependencies
+        run: python -m pip_audit .
+
+  mutation-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -28,8 +59,63 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Remove each security guard and expect a failing test
+        run: python scripts/mutation_check.py
 
-      - name: Audit Python dependencies
-        run: python -m pip_audit .
+  proxy-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[e2e]"
+
+      - name: Run the poisoned server and the gateway, with the MCP SDK as the agent
+        run: python scripts/e2e_proxy.py
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the image
+        run: docker compose build api
+
+      - name: Scan the image for fixable high and critical vulnerabilities
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+          mcp-security-gateway-api:latest
+
+      - name: Start the gateway and Redis
+        run: docker compose up -d --wait --wait-timeout 120
+
+      - name: Smoke-test health and an MCP call
+        run: python3 scripts/docker_smoke.py
+
+      - name: Container logs
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down
