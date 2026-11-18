@@ -113,3 +113,6 @@ example server in memory. They cover:
 
 `python scripts/mutation_check.py proxy` removes each of ten proxy guards in
 turn and expects a failing test every time. CI runs it on every pull request.
+
+[`scripts/e2e_proxy.py`](../scripts/e2e_proxy.py) repeats the run above over real HTTP,
+with the MCP Python SDK as the agent, and asserts each step. CI runs it as well.

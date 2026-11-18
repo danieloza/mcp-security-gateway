@@ -532,6 +532,16 @@ python scripts/mutation_check.py          # or: proxy, oauth
 
 CI runs it on every pull request and on every push to `main`.
 
+`scripts/e2e_proxy.py` runs proxy mode end to end, over real HTTP. It starts
+the poisoned example server and the gateway on free loopback ports, uses the
+official MCP Python SDK as the agent, and asserts every step from the first sync
+to the rug pull. CI runs it too:
+
+```powershell
+python -m pip install -e ".[e2e]"
+python scripts/e2e_proxy.py
+```
+
 ## Production-shaped, Not Production-ready
 
 This repository proves the security control path. It intentionally does not
