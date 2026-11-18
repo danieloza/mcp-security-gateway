@@ -1156,6 +1156,12 @@ tbody tr:hover {
   font-size: 13px;
 }
 
+.sync-when {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .sync-reason,
 .sync-findings,
 .diff-label {

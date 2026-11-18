@@ -356,22 +356,32 @@ function renderUpstreams() {
     button.addEventListener("click", () => syncUpstream(upstream.id, button));
     actions.append(button);
     card.append(header, meta, actions);
-    const results = state.syncResults.get(upstream.id);
-    if (results) card.append(renderSyncResults(results));
+    const sync = state.syncResults.get(upstream.id);
+    if (sync) card.append(renderSyncResults(sync, upstream));
     panel.append(card);
   });
 }
 
-function renderSyncResults(results) {
+// A sync result is a snapshot. A later call can quarantine a tool (a rug pull caught
+// at call time), so each row also shows the tool's trust state now when it differs.
+function renderSyncResults(sync, upstream) {
   const list = document.createElement("div");
   list.className = "sync-results";
-  results.forEach((item) => {
+  const when = new Date(sync.at);
+  list.append(textElement("p", `Last sync at ${Number.isNaN(when.getTime()) ? sync.at : when.toLocaleTimeString()}`, "sync-when"));
+  const trustNow = new Map(upstream.tools.map((tool) => [tool.name, tool.trust_status]));
+  const expected = { pinned: "verified", unchanged: "verified", quarantined: "quarantined" };
+  sync.results.forEach((item) => {
     const row = document.createElement("div");
     row.className = "sync-result";
     const head = document.createElement("div");
     head.className = "sync-result-head";
     head.append(textElement("strong", item.tool), badge(item.status));
     if (item.reason) head.append(textElement("span", item.reason.replaceAll("_", " "), "sync-reason"));
+    const now = trustNow.get(item.tool);
+    if (expected[item.status] && now && now !== expected[item.status]) {
+      head.append(textElement("span", "since then", "sync-reason"), badge(now));
+    }
     row.append(head);
     if (item.findings && item.findings.length) {
       const types = [...new Set(item.findings.map((finding) => finding.type.replaceAll("_", " ")))];
@@ -394,7 +404,7 @@ async function syncUpstream(id, button) {
   button.disabled = true;
   try {
     const result = await api(`/upstreams/${encodeURIComponent(id)}/sync`, { method: "POST" });
-    state.syncResults.set(id, result.results);
+    state.syncResults.set(id, { at: result.synced_at, results: result.results });
     const counts = {};
     for (const item of result.results) counts[item.status] = (counts[item.status] || 0) + 1;
     const labels = { pinned: "pinned", quarantined: "quarantined", missing_upstream: "no longer served" };
