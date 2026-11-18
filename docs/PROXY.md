@@ -13,7 +13,28 @@ is forwarded.
 
 ![A rug pull caught by the gateway: the pinned description next to the poisoned one the upstream serves now, with its hidden text decoded](assets/upstream-rug-pull.jpg)
 
-**What the gateway adds for upstream servers:**
+## A call, step by step
+
+```mermaid
+flowchart TD
+  Call["Agent: tools/call notes.search_notes"] --> Read["The gateway reads the upstream's current definition"]
+  Read --> Pin{"Same as the pin?"}
+  Pin -->|changed| Pulled["denied: tool quarantined, critical incident"]
+  Pin -->|unreachable| Closed["denied: fails closed, incident"]
+  Pin -->|same| Policy{"Policy: scope, rate limit, DLP, risk"}
+  Policy -->|violation| Denied["denied, with an incident"]
+  Policy -->|high risk| Approval["approval_required: a checker approves, the maker claims a one-time lease"]
+  Policy -->|low risk| Execute["Execute"]
+  Approval --> Execute
+  Execute --> Recheck{"Still the same as the pin?"}
+  Recheck -->|changed| Stopped["stopped: tool quarantined, critical incident"]
+  Recheck -->|same| Forward["Forward tools/call: the evaluated arguments only, no caller credentials"]
+  Forward --> Inspect{"Output reads like instructions to the agent?"}
+  Inspect -->|yes| Withheld["response_blocked for the agent, output_withheld for operators, incident"]
+  Inspect -->|no| Executed["executed, with secrets redacted"]
+```
+
+## What the gateway adds
 
 - **Pinning on review.** A security or platform admin runs
   `POST /upstreams/{id}/sync`, or **Sync upstream** in the Tool trust module.
@@ -39,8 +60,8 @@ is forwarded.
   On a match, the agent gets `response_blocked` with the finding types and a
   digest, never the text. An incident and an audit event are recorded, and the
   request's execution status is `output_withheld`, so **Live traffic** shows it
-  apart from a plain execution. Secrets
-  in clean output are redacted, as for built-in tools.
+  apart from a plain execution. Secrets in clean output are redacted, as for
+  built-in tools.
 - **Quarantined tools are not listed.** `tools/list` shows verified tools only,
   so a poisoned description never reaches the agent.
 - **A small upstream client of its own,** on `httpx`:

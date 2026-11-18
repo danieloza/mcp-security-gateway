@@ -30,6 +30,29 @@ MCP 2025-11-25 authorization specification describes it:
 - **The static demo keys and `X-API-Key` are not accepted** in this mode.
 - **Production refuses to start in static mode.**
 
+## The flow
+
+```mermaid
+sequenceDiagram
+  participant Client as MCP client
+  participant Gateway as Gateway (resource server)
+  participant AS as Authorization server
+  Client->>Gateway: POST /mcp without a token
+  Gateway-->>Client: 401, WWW-Authenticate with resource_metadata and scope
+  Client->>Gateway: GET /.well-known/oauth-protected-resource/mcp
+  Gateway-->>Client: resource, authorization_servers, scopes_supported
+  Client->>AS: authorization code with PKCE, for the gateway as resource
+  AS-->>Client: access token whose aud names the gateway
+  Client->>Gateway: POST /mcp with Authorization: Bearer
+  Gateway->>AS: JWKS (cached)
+  Note over Gateway: signature (asymmetric only), iss, exp, nbf, sub,<br/>aud is this resource, scope, sub mapped to a user
+  Gateway-->>Client: tools/list and tools/call as the mapped user
+```
+
+The gateway never sees the client's authorization request and never forwards the
+token. The local Keycloak realm below also issues scripted tokens with the
+password grant, for testing only.
+
 ## Configuration
 
 Production mode (`MSG_ENVIRONMENT=production`) refuses to start unless this
