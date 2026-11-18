@@ -24,6 +24,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    # Start as the redis user: the image's entrypoint would otherwise switch to it
+    # from root, which needs the SETUID and SETGID capabilities dropped below.
+    user: redis
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
