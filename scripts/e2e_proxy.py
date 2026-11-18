@@ -145,6 +145,27 @@ async def scenario(gateway: str, upstream: str) -> None:
     check("incidents", len(rug_pulls) == 1, f"{len(rug_pulls)} rug-pull incident")
 
 
+def write_summary(failed: bool) -> None:
+    """Show the steps on the GitHub Actions run page, when running there."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    import importlib.metadata
+
+    lines = [
+        "### Proxy mode end to end",
+        "",
+        f"The poisoned example server and the gateway over HTTP, with MCP Python SDK {importlib.metadata.version('mcp')} as the agent.",
+        "",
+        "| Step | Observed |",
+        "| --- | --- |",
+    ]
+    lines += [f"| {step} | {observed.replace('|', '/')} |" for step, observed in ROWS]
+    lines += ["", "**FAILED** (server logs are in the job output)." if failed else "**All steps passed.**", ""]
+    with open(target, "a", encoding="utf-8") as summary:
+        summary.write("\n".join(lines) + "\n")
+
+
 def main() -> int:
     import importlib.metadata
 
@@ -196,6 +217,7 @@ def main() -> int:
         print(f"MCP Python SDK {importlib.metadata.version('mcp')}, gateway {gateway_url}, upstream {upstream_url}")
         for step, observed in ROWS:
             print(f"  {step:<{width}}  {observed}")
+        write_summary(failed)
         if failed:
             for name in logs:
                 print(f"--- {name} log ---")

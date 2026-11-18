@@ -12,6 +12,7 @@ Run from the repository root, in the project's environment:
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 import sys
@@ -109,7 +110,7 @@ SUITES: dict[str, tuple[str, list[tuple[str, str, list[tuple[str, str]]]]]] = {
 }
 
 
-def run_suite(name: str) -> int:
+def run_suite(name: str, rows: list[tuple[str, str, str]]) -> int:
     tests, mutations = SUITES[name]
     survived = 0
     print(f"[{name}] {len(mutations)} mutations against {tests}")
@@ -121,6 +122,7 @@ def run_suite(name: str) -> int:
         pairs = [(anchor.replace("\n", eol), new.replace("\n", eol)) for anchor, new in edits]
         if any(text.count(anchor) != 1 for anchor, _ in pairs):
             print(f"  SETUP ERROR  {guard}: an anchor is missing or repeated in {path}")
+            rows.append((name, guard, "setup error"))
             survived += 1
             continue
         for anchor, new in pairs:
@@ -139,10 +141,25 @@ def run_suite(name: str) -> int:
         last = (result.stdout.strip().splitlines() or ["?"])[-1]
         if result.returncode == 0:
             survived += 1
+            rows.append((name, guard, "**survived**"))
             print(f"  SURVIVED     {guard}: {last}")
         else:
+            rows.append((name, guard, "caught"))
             print(f"  CAUGHT       {guard}: {last}")
     return survived
+
+
+def write_summary(rows: list[tuple[str, str, str]], survived: int) -> None:
+    """Show the result on the GitHub Actions run page, when running there."""
+    target = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not target:
+        return
+    lines = ["### Mutation check", "", "| Suite | Guard removed | Result |", "| --- | --- | --- |"]
+    lines += [f"| {suite} | {guard} | {status} |" for suite, guard, status in rows]
+    caught = len(rows) - survived
+    lines += ["", f"**{caught} of {len(rows)} mutations caught.**" if survived == 0 else f"**{survived} of {len(rows)} not caught.**", ""]
+    with open(target, "a", encoding="utf-8") as summary:
+        summary.write("\n".join(lines) + "\n")
 
 
 def main(argv: list[str]) -> int:
@@ -151,8 +168,10 @@ def main(argv: list[str]) -> int:
     if unknown:
         print(f"Unknown suite: {', '.join(unknown)}. Choose from: {', '.join(SUITES)}.")
         return 2
-    survived = sum(run_suite(name) for name in names)
+    rows: list[tuple[str, str, str]] = []
+    survived = sum(run_suite(name, rows) for name in names)
     print("All mutations caught." if survived == 0 else f"{survived} mutation(s) not caught.")
+    write_summary(rows, survived)
     return 1 if survived else 0
 
 
