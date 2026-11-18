@@ -196,7 +196,8 @@ evidence-pack digest.
 
 ## Proxy Mode: Sync an Upstream Server
 
-Run the deliberately malicious example server and point the gateway at it:
+Run the deliberately malicious example server and point the gateway at it (see
+[Proxy Mode](PROXY.md)):
 
 ```bash
 python examples/poisoned_server.py &          # listens on 127.0.0.1:8100
@@ -277,6 +278,8 @@ and keep quiet. The agent gets the finding types and a digest, never the text:
 ```
 
 The same call with `"query":"rota"` returns `status: executed` with the note.
+For the withheld call, `GET /requests/REQUEST_ID` reports `execution_status:
+output_withheld`, and **Live traffic** shows it that way.
 
 ## Proxy Mode: A Rug Pull
 
@@ -322,8 +325,8 @@ decodes. `POST http://127.0.0.1:8100/reset` restores the example server.
 
 ## OAuth Mode: Discover and Authenticate
 
-With `MSG_AUTH_MODE=oauth` and the variables from the README's **OAuth
-Resource-Server Mode** section, the gateway publishes its protected-resource
+With `MSG_AUTH_MODE=oauth` and the variables from
+[OAuth Resource-Server Mode](OAUTH.md#configuration), the gateway publishes its protected-resource
 metadata:
 
 ```bash
@@ -357,5 +360,5 @@ www-authenticate: Bearer scope="mcp:tools", resource_metadata="http://127.0.0.1:
 - **A token without the needed scope** gets `403` with
   `error="insufficient_scope"`.
 - **A valid token** works like the demo keys above, as
-  `Authorization: Bearer $TOKEN`. The README shows how to get one from the
-  local Keycloak realm.
+  `Authorization: Bearer $TOKEN`. [OAuth Resource-Server Mode](OAUTH.md#try-it-with-a-local-keycloak)
+  shows how to get one from the local Keycloak realm.

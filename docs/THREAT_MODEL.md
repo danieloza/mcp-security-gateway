@@ -64,13 +64,13 @@ networks, or downstream business APIs.
 | Silent execution failure | Adapter failures are persisted as failed executions and HMAC-chained `tool_execution_failed` events | Failure reasons are redacted by pattern, not by a full DLP engine |
 | Tool poisoning: hidden instructions in a new upstream tool's definition | Pattern scan at sync; quarantine on first sight; quarantined tools are not listed to agents | Patterns, not a proof: a novel phrasing can pass review |
 | Upstream rug pull after review | Compare the served definition with the pin on every call and again just before forwarding; on a change, quarantine, deny and open an incident, also between approval and execution | Definitions are compared, not behavior: an upstream can still act differently from what it declares |
-| Prompt injection through tool output | Inspect upstream output before it reaches the agent; withhold it with finding types, a digest, an incident and an audit event | Patterns, not a proof: no match only means no known pattern was found |
+| Prompt injection through tool output | Inspect upstream output before it reaches the agent; withhold it with finding types, a digest, an incident and an audit event; mark the request `output_withheld` | Patterns, not a proof: no match only means no known pattern was found |
 | Token passthrough to an upstream | The upstream client has no access to the caller's credentials and sends only protocol headers | Upstream credentials are not supported yet |
 | Hostile upstream answers | No redirects, a 1 MiB cap, a 10 s timeout; an unreachable upstream fails closed | No egress policy or rebinding-safe DNS for upstream hosts |
 | Token minted for another resource | `aud` must contain the gateway's resource URI (RFC 8707) | Depends on the authorization server setting the audience |
-| Algorithm confusion (`none`, HS256 with the public key) | Asymmetric allowlist, checked before any key lookup and again when decoding | None known |
+| Algorithm confusion (`none`, HS256 with the public key) | Asymmetric allowlist, checked before any key lookup and again when decoding | Signature checks rely on PyJWT and `cryptography` |
 | Unknown or unmapped token subject | Explicit subject map; unknown subjects are refused, never created | The map is maintained by hand |
-| Public demo keys in production | Production mode refuses to start unless OAuth mode is on | None known |
+| Public demo keys in production | Production mode refuses to start unless OAuth mode is on | The guard keys off `MSG_ENVIRONMENT=production`: a shared or staging deployment left on the default `local` still accepts the public keys |
 
 ## Security Invariants
 

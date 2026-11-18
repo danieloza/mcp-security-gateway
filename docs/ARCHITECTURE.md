@@ -110,14 +110,16 @@ listed until a security or platform administrator syncs it.
 - **Just before forwarding.** The comparison runs again after any approval and
   lease claim. This closes the window between approval and execution.
 - **Forwarding.** A small client of the gateway's own, built on `httpx`, sends
-  `initialize`, `notifications/initialized` and `tools/call`. It follows no
+  `initialize`, `notifications/initialized`, `tools/list` (to read the current
+  definitions) and `tools/call`. It follows no
   redirects, caps answers at 1 MiB, times out after 10 seconds, and reads JSON
   or SSE. It sends only the protocol headers, so the caller's credentials
   never leave the gateway.
 - **Output.** The result is checked for instruction-like content before it
   reaches the agent. A match withholds it: the agent gets `response_blocked`
   with the finding types and a digest, and the gateway records an incident and
-  a `tool_output_withheld` audit event. Clean output is redacted like the
+  a `tool_output_withheld` audit event. The request's execution status is
+  `output_withheld`, not `executed`. Clean output is redacted like the
   built-in tools' output.
 - **Failure.** An unreachable upstream fails closed.
 
