@@ -7,11 +7,16 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Runtime_Gateway-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![MCP](https://img.shields.io/badge/MCP-tools%2Fcall-111827?style=for-the-badge)
-![Security Tests](https://img.shields.io/badge/Security_Tests-123_Passing-16A34A?style=for-the-badge)
+![Security Tests](https://img.shields.io/badge/Security_Tests-148_Passing-16A34A?style=for-the-badge)
 ![API Keys](https://img.shields.io/badge/API_Keys-Digest_Only-0284C7?style=for-the-badge)
 [![License: MIT](https://img.shields.io/badge/License-MIT-F59E0B?style=for-the-badge)](LICENSE)
 
 [Overview](#what-it-solves) · [Product Demo](#product-demo) · [Product Tour](#product-tour) · [Verified Execution](#verified-execution-flow) · [Connect a Client](#connect-your-client) · [Proxy Mode](#proxy-mode-real-mcp-servers-behind-the-gateway) · [OAuth](#oauth-resource-server-mode) · [API](docs/API_EXAMPLES.md) · [Threat Model](docs/THREAT_MODEL.md) · [Patch Notes](CHANGELOG.md) · [MIT License](LICENSE)
+
+**[Try the live sandbox](https://mcp-security-gateway-sandbox.onrender.com/dashboard)** with the
+public key `msg-security-demo`. Every visitor shares it, it resets every hour,
+and the first load after a quiet spell takes about a minute while the free
+instance wakes up. See [Public Sandbox](#public-sandbox).
 
 ![Proxy mode in the console: an upstream server synced, three agent calls, a rug pull blocked, and the diff with its hidden text decoded](docs/assets/proxy-mode-demo.gif)
 
@@ -528,6 +533,8 @@ database with it.** To stop the stack and keep the data, use
 `docker compose down`.
 
 ## Public Sandbox
+
+The sandbox runs at https://mcp-security-gateway-sandbox.onrender.com.
 
 `deploy/demo/Dockerfile` builds a sandbox that is safe to put online. It runs the
 gateway and the poisoned example server in one container, and starts with
