@@ -238,6 +238,16 @@ def _mcp_tool_result(
     }
 
 
+def forwarded_for_and_peer(request: Request) -> tuple[str | None, str | None]:
+    """Every X-Forwarded-For line, in order, and the TCP peer.
+
+    A client can send its own X-Forwarded-For line before the one a proxy
+    appends, so every line counts, not only the first.
+    """
+    forwarded_for = ", ".join(request.headers.getlist("x-forwarded-for")) or None
+    return forwarded_for, request.client.host if request.client else None
+
+
 def build_sandbox(
     repo: SQLiteRepository,
     rates: RateLimitStore,
@@ -303,10 +313,7 @@ def create_app(
                     status_code=status.HTTP_411_LENGTH_REQUIRED,
                     content={"detail": "The sandbox needs a Content-Length header on request bodies."},
                 )
-            # Every X-Forwarded-For line, in order: a client can send its own line
-            # before the one the proxy appends.
-            forwarded_for = ", ".join(request.headers.getlist("x-forwarded-for")) or None
-            wait = sandbox.admit(forwarded_for, request.client.host if request.client else None)
+            wait = sandbox.admit(*forwarded_for_and_peer(request))
             if wait is not None:
                 return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -372,8 +379,8 @@ def create_app(
                 )
 
         @app.get("/sandbox")
-        def sandbox_status() -> dict[str, Any]:
-            return guard.status()
+        def sandbox_status(request: Request) -> dict[str, Any]:
+            return {**guard.status(), **guard.caller(*forwarded_for_and_peer(request))}
 
         @app.post("/sandbox/rug-pull")
         def sandbox_rug_pull(auth: AuthContext = Depends(get_current_auth)) -> dict[str, Any]:

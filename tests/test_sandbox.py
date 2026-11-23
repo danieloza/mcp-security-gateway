@@ -144,6 +144,19 @@ def test_status_reports_the_limits(tmp_path: Path, clock: Clock, controls: Fixtu
     assert status["ip_limit_per_minute"] == 10
 
 
+def test_status_shows_the_caller_its_own_address(
+    tmp_path: Path, clock: Clock, controls: FixtureControls, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MSG_TRUSTED_PROXY_HOPS", "1")
+    client, _ = make_sandbox_client(tmp_path, clock, controls)
+    behind_proxy = client.get("/sandbox", headers={"X-Forwarded-For": "198.51.100.1, 203.0.113.7"}).json()
+    assert behind_proxy["your_address"] == "203.0.113.7"
+    assert behind_proxy["forwarded_for_entries"] == 2
+    direct = client.get("/sandbox").json()
+    assert direct["your_address"] == "testclient"
+    assert direct["forwarded_for_entries"] == 0
+
+
 def test_a_body_without_content_length_is_refused(tmp_path: Path, clock: Clock, controls: FixtureControls) -> None:
     client, _ = make_sandbox_client(tmp_path, clock, controls)
     chunked = client.post("/mcp", headers=OPERATOR, content=iter([json.dumps(KB_SEARCH).encode()]))

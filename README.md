@@ -548,6 +548,9 @@ and a button that resets the sandbox.
 - **Proxied addresses:** behind a proxy, the address comes from the
   `X-Forwarded-For` entries that trusted proxies appended
   (`MSG_TRUSTED_PROXY_HOPS`). An entry the client wrote itself never counts.
+  `GET /sandbox` shows callers the address the gateway sees for them and how
+  many entries arrived. After a deploy, a private address there means the
+  setting is too low.
 - **Request bodies:** capped at 64 KiB. A body without `Content-Length` gets
   `411`, so chunked encoding cannot skip the cap.
 - **Resets:** all data resets every 60 minutes (`MSG_SANDBOX_RESET_MINUTES`), on
