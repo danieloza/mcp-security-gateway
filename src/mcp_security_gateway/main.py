@@ -6,6 +6,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from mcp_security_gateway import __version__
@@ -14,6 +15,7 @@ from mcp_security_gateway.config import (
     allowed_origins,
     auth_mode,
     is_production,
+    is_sandbox,
     max_request_bytes,
     redis_url,
 )
@@ -49,6 +51,7 @@ from mcp_security_gateway.schemas import (
     ToolManifestOut,
     UserOut,
 )
+from mcp_security_gateway.sandbox import BODY_METHODS, Sandbox, SandboxSettings
 from mcp_security_gateway.services import AuthContext, GatewayService
 from mcp_security_gateway.upstream import UpstreamRegistry, load_upstreams
 from mcp_security_gateway.state import RateLimitStore, build_rate_limit_store
@@ -235,11 +238,27 @@ def _mcp_tool_result(
     }
 
 
+def build_sandbox(
+    repo: SQLiteRepository,
+    rates: RateLimitStore,
+    registry: UpstreamRegistry,
+    **options: Any,
+) -> Sandbox:
+    """The public sandbox's guard. A reset reseeds the database and re-registers upstreams."""
+    return Sandbox(
+        SandboxSettings.from_environment(),
+        repo,
+        on_reset=lambda: GatewayService(repo, rates, upstreams=registry).register_upstreams(),
+        **options,
+    )
+
+
 def create_app(
     repo: SQLiteRepository | None = None,
     rates: RateLimitStore | None = None,
     token_verifier: TokenVerifier | None = None,
     upstreams: UpstreamRegistry | None = None,
+    sandbox: Sandbox | None = None,
 ) -> FastAPI:
     # Read first: production refuses to start with the public static keys.
     mode = auth_mode()
@@ -263,6 +282,9 @@ def create_app(
     app.state.upstreams = registry
     if registry:
         GatewayService(repo or repository, rates or rate_limit_store, upstreams=registry).register_upstreams()
+    if sandbox is None and is_sandbox():
+        sandbox = build_sandbox(repo or repository, rates or rate_limit_store, registry)
+    app.state.sandbox = sandbox
     package_path = Path(__file__).parent
     dashboard_path = package_path / "dashboard.html"
     dashboard_css_path = package_path / "dashboard.css"
@@ -275,6 +297,23 @@ def create_app(
 
     @app.middleware("http")
     async def request_limits_and_security_headers(request: Request, call_next: Any) -> Any:
+        if sandbox is not None:
+            if request.method in BODY_METHODS and "content-length" not in request.headers:
+                return JSONResponse(
+                    status_code=status.HTTP_411_LENGTH_REQUIRED,
+                    content={"detail": "The sandbox needs a Content-Length header on request bodies."},
+                )
+            # Every X-Forwarded-For line, in order: a client can send its own line
+            # before the one the proxy appends.
+            forwarded_for = ", ".join(request.headers.getlist("x-forwarded-for")) or None
+            wait = sandbox.admit(forwarded_for, request.client.host if request.client else None)
+            if wait is not None:
+                return JSONResponse(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    content={"detail": "Sandbox request limit reached for this address."},
+                    headers={"Retry-After": str(wait)},
+                )
+            await run_in_threadpool(sandbox.reset_if_due)
         content_length = request.headers.get("content-length")
         if content_length:
             try:
@@ -321,6 +360,44 @@ def create_app(
     @app.get("/health", response_model=HealthOut)
     def health(service: GatewayService = Depends(get_service)) -> HealthOut:
         return HealthOut(**service.health_snapshot(), auth_mode=mode)
+
+    if sandbox is not None:
+        guard = sandbox
+
+        def require_sandbox_admin(auth: AuthContext) -> None:
+            if auth.user.role not in {"security_admin", "platform_admin"}:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only security or platform admins can change the sandbox.",
+                )
+
+        @app.get("/sandbox")
+        def sandbox_status() -> dict[str, Any]:
+            return guard.status()
+
+        @app.post("/sandbox/rug-pull")
+        def sandbox_rug_pull(auth: AuthContext = Depends(get_current_auth)) -> dict[str, Any]:
+            require_sandbox_admin(auth)
+            try:
+                guard.rug_pull()
+            except OSError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="The sandbox test server did not answer.",
+                ) from exc
+            return {"status": "swapped"}
+
+        @app.post("/sandbox/reset")
+        def sandbox_reset(auth: AuthContext = Depends(get_current_auth)) -> dict[str, Any]:
+            require_sandbox_admin(auth)
+            wait = guard.manual_reset()
+            if wait is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="The sandbox was reset less than a minute ago.",
+                    headers={"Retry-After": str(wait)},
+                )
+            return guard.status()
 
     if oauth is not None:
         metadata = oauth.settings.metadata_document()

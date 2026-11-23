@@ -527,6 +527,42 @@ the gateway uses.
 database with it.** To stop the stack and keep the data, use
 `docker compose down`.
 
+## Public Sandbox
+
+`deploy/demo/Dockerfile` builds a sandbox that is safe to put online. It runs the
+gateway and the poisoned example server in one container, and starts with
+`MSG_ENVIRONMENT=sandbox` and the public demo keys:
+
+```powershell
+docker build -f deploy/demo/Dockerfile -t mcp-security-gateway-sandbox .
+docker run --rm -p 127.0.0.1:8010:8000 mcp-security-gateway-sandbox
+```
+
+Open `http://127.0.0.1:8010/dashboard`. A strip at the top names the public
+keys. It also has a button that makes the test server swap a tool description,
+and a button that resets the sandbox.
+
+**Sandbox mode adds these limits to the gateway's own:**
+- **Per address:** 120 requests a minute per client address
+  (`MSG_SANDBOX_IP_LIMIT_PER_MINUTE`).
+- **Proxied addresses:** behind a proxy, the address comes from the
+  `X-Forwarded-For` entries that trusted proxies appended
+  (`MSG_TRUSTED_PROXY_HOPS`). An entry the client wrote itself never counts.
+- **Request bodies:** capped at 64 KiB. A body without `Content-Length` gets
+  `411`, so chunked encoding cannot skip the cap.
+- **Resets:** all data resets every 60 minutes (`MSG_SANDBOX_RESET_MINUTES`), on
+  every start, and whenever the SQLite file passes 16 MiB
+  (`MSG_SANDBOX_MAX_DB_BYTES`). Each reset also resets the test server.
+- **Controls:** only a security or platform admin can use them. A manual reset
+  can run once a minute.
+- **The test server:** the gateway reaches it on loopback only, and any other
+  address is refused at start.
+
+[`render.yaml`](render.yaml) describes the sandbox as a free Render web service.
+Nothing deploys from it until the repository owner creates a Blueprint.
+`scripts/sandbox_smoke.py` checks the image in CI. It syncs the test server,
+makes a clean call, swaps the tool and checks that the next call is denied.
+
 ## Testing
 
 ```powershell
@@ -554,11 +590,11 @@ server in memory. [docs/OAUTH.md](docs/OAUTH.md#tests) and
 
 `scripts/mutation_check.py` checks that the tests protect each guard. It
 removes one guard at a time, runs the matching test file, and restores the
-source byte for byte. There are eleven mutations for proxy mode and nine for OAuth
-mode, and each one must make a test fail:
+source byte for byte. There are eleven mutations for proxy mode, nine for OAuth
+mode and nine for the sandbox, and each one must make a test fail:
 
 ```powershell
-python scripts/mutation_check.py          # or: proxy, oauth
+python scripts/mutation_check.py          # or: proxy, oauth, sandbox
 ```
 
 CI runs it on every pull request and on every push to `main`.

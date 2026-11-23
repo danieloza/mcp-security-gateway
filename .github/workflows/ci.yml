@@ -119,3 +119,26 @@ jobs:
       - name: Stop the stack
         if: always()
         run: docker compose down
+
+      - name: Build the sandbox image
+        run: docker build -f deploy/demo/Dockerfile -t mcp-security-gateway-sandbox .
+
+      - name: Scan the sandbox image
+        run: >-
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock
+          aquasec/trivy:0.76.2@sha256:8f6bb947dbc528902e11f2f5be52f7b519f6a39d5d148f41166f2040499768fb
+          image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+          mcp-security-gateway-sandbox:latest
+
+      - name: Start the sandbox and smoke-test it
+        run: |
+          docker run -d --name sandbox -p 127.0.0.1:8010:8000 mcp-security-gateway-sandbox
+          python3 scripts/sandbox_smoke.py http://127.0.0.1:8010
+
+      - name: Sandbox logs
+        if: failure()
+        run: docker logs sandbox
+
+      - name: Stop the sandbox
+        if: always()
+        run: docker rm -f sandbox || true

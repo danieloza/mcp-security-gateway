@@ -4,6 +4,25 @@ Significant changes to the MCP Security Gateway are documented here.
 
 ## [Unreleased]
 
+### Public sandbox
+
+- **`MSG_ENVIRONMENT=sandbox`**, for a gateway that anyone may use. It keeps the
+  public demo keys and adds the following limits:
+  - a request limit per client address, read from the `X-Forwarded-For`
+    entries that trusted proxies appended;
+  - `411` for a request body without `Content-Length`;
+  - a full reset on a schedule, on every start and when the database passes
+    its size cap.
+
+  Admins also get two controls: one makes the bundled test server swap a tool,
+  the other resets the sandbox.
+- **`deploy/demo/Dockerfile`** runs the gateway and the poisoned example server
+  in one container. **`render.yaml`** describes it as a free Render web service.
+- **The console shows a sandbox strip** with the public keys and both controls.
+- **CI builds, scans and smoke-tests the sandbox image**
+  (`scripts/sandbox_smoke.py`). The mutation check has a third suite, with
+  nine sandbox guards.
+
 ### Dependencies
 
 - **Keycloak 26.4.5 → 26.8.2-2** in the compose profile `oauth` (#12). The

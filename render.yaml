@@ -1,0 +1,23 @@
+# The public sandbox on Render's free plan. Render reads this file only when the
+# repository owner creates a Blueprint from it; nothing deploys before that.
+# The sandbox holds no secrets: its keys are the public demo fixtures.
+services:
+  - type: web
+    name: mcp-security-gateway-sandbox
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./deploy/demo/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    # Deploy a new main only after its CI checks pass.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: MSG_SANDBOX_RESET_MINUTES
+        value: "60"
+      - key: MSG_SANDBOX_IP_LIMIT_PER_MINUTE
+        value: "120"
+      # How many X-Forwarded-For entries Render's proxies append. One is the
+      # assumption; confirm it against the header after the first deploy.
+      - key: MSG_TRUSTED_PROXY_HOPS
+        value: "1"

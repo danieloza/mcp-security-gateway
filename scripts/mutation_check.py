@@ -6,8 +6,8 @@ that leaves the tests green is a guard that no test protects.
 
 Run from the repository root, in the project's environment:
 
-    python scripts/mutation_check.py            # both suites
-    python scripts/mutation_check.py proxy      # or: oauth
+    python scripts/mutation_check.py            # every suite
+    python scripts/mutation_check.py proxy      # or: oauth, sandbox
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ import sys
 
 import ci_summary  # scripts/ci_summary.py
 
+CONFIG = "src/mcp_security_gateway/config.py"
 MAIN = "src/mcp_security_gateway/main.py"
 OAUTH = "src/mcp_security_gateway/oauth.py"
+SANDBOX = "src/mcp_security_gateway/sandbox.py"
 SERVICES = "src/mcp_security_gateway/services.py"
 UPSTREAM = "src/mcp_security_gateway/upstream.py"
 
@@ -108,6 +110,40 @@ SUITES: dict[str, tuple[str, list[tuple[str, str, list[tuple[str, str]]]]]] = {
             ("expiry not required", OAUTH, [
                 ('"require": ["exp", "iss", "aud", "sub"]',
                  '"require": ["iss", "aud", "sub"], "verify_exp": False'),
+            ]),
+        ],
+    ),
+    "sandbox": (
+        "tests/test_sandbox.py",
+        [
+            ("per-IP limit ignored", SANDBOX, [
+                ("if count > self.limit:", "if False:"),
+            ]),
+            ("leftmost X-Forwarded-For entry trusted", SANDBOX, [
+                ("return entries[-trusted_hops]", "return entries[0]"),
+            ]),
+            ("body without Content-Length accepted", MAIN, [
+                ('if request.method in BODY_METHODS and "content-length" not in request.headers:', "if False:"),
+            ]),
+            ("only the first X-Forwarded-For line read", MAIN, [
+                ('", ".join(request.headers.getlist("x-forwarded-for")) or None',
+                 'request.headers.get("x-forwarded-for")'),
+            ]),
+            ("scheduled reset dropped", SANDBOX, [
+                ("if self._clock() - self.last_reset_at >= self.settings.reset_seconds:", "if False:"),
+            ]),
+            ("database size cap ignored", SANDBOX, [
+                ("if self.repo.size_bytes() > self.settings.max_db_bytes:", "if False:"),
+            ]),
+            ("sandbox controls open to any user", MAIN, [
+                ("        def require_sandbox_admin(auth: AuthContext) -> None:\n",
+                 "        def require_sandbox_admin(auth: AuthContext) -> None:\n            return\n"),
+            ]),
+            ("manual reset cooldown dropped", SANDBOX, [
+                ("if wait > 0:", "if False:"),
+            ]),
+            ("test server allowed off loopback", CONFIG, [
+                ('if scheme != "http" or host not in SANDBOX_FIXTURE_HOSTS:', "if False:"),
             ]),
         ],
     ),
