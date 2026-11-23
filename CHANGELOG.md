@@ -16,6 +16,9 @@ Significant changes to the MCP Security Gateway are documented here.
 
   Admins also get two controls: one makes the bundled test server swap a tool,
   the other resets the sandbox.
+- **`GET /sandbox` shows callers their own address as the gateway sees it**,
+  and how many `X-Forwarded-For` entries arrived. A private address there means
+  `MSG_TRUSTED_PROXY_HOPS` is lower than the number of proxies in front.
 - **`deploy/demo/Dockerfile`** runs the gateway and the poisoned example server
   in one container. **`render.yaml`** describes it as a free Render web service.
 - **The console shows a sandbox strip** with the public keys and both controls.

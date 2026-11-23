@@ -146,6 +146,18 @@ class Sandbox:
         """Count a request against its client's limit. Seconds to wait, or None."""
         return self.limiter.hit(client_ip(forwarded_for, peer, self.settings.trusted_hops))
 
+    def caller(self, forwarded_for: str | None, peer: str | None) -> dict[str, Any]:
+        """What the sandbox sees of the caller: its address, and how many entries arrived.
+
+        After a deploy, compare `your_address` with your public address: a private
+        address means MSG_TRUSTED_PROXY_HOPS is too low. With no X-Forwarded-For
+        sent by you, `forwarded_for_entries` is the number of proxies that appended one.
+        """
+        return {
+            "your_address": client_ip(forwarded_for, peer, self.settings.trusted_hops),
+            "forwarded_for_entries": len(forwarded_for.split(",")) if forwarded_for else 0,
+        }
+
     def due_reset(self) -> str | None:
         if self._clock() - self.last_reset_at >= self.settings.reset_seconds:
             return "schedule"
