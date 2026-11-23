@@ -17,7 +17,10 @@ services:
         value: "60"
       - key: MSG_SANDBOX_IP_LIMIT_PER_MINUTE
         value: "120"
-      # How many X-Forwarded-For entries Render's proxies append. One is the
-      # assumption; confirm it against the header after the first deploy.
+      # How many X-Forwarded-For entries the proxies in front append. Measured
+      # on 2026-11-23: a request without its own header arrives with three, the
+      # last of them a private address. With three hops the gateway takes the
+      # entry the outermost proxy wrote; GET /sandbox shows whether
+      # `your_address` is really the caller's own.
       - key: MSG_TRUSTED_PROXY_HOPS
-        value: "1"
+        value: "3"

@@ -96,7 +96,7 @@ def sandbox_max_db_bytes() -> int:
 
 def trusted_proxy_hops() -> int:
     """How many proxies in front of the sandbox append to X-Forwarded-For."""
-    return _bounded_int("MSG_TRUSTED_PROXY_HOPS", 1, 0, 3)
+    return _bounded_int("MSG_TRUSTED_PROXY_HOPS", 1, 0, 5)
 
 
 SANDBOX_FIXTURE_HOSTS = ("127.0.0.1", "localhost")

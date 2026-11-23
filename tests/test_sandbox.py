@@ -121,6 +121,8 @@ def test_the_test_server_is_reached_on_loopback_only(monkeypatch: pytest.MonkeyP
         ("203.0.113.7", "10.0.0.2", 1, "203.0.113.7"),  # the proxy's entry
         ("198.51.100.1, 203.0.113.7", "10.0.0.2", 1, "203.0.113.7"),  # the client's own entry is ignored
         ("198.51.100.1, 203.0.113.7, 10.1.1.1", "10.0.0.2", 2, "203.0.113.7"),  # two proxies
+        # Render's measured shape: three proxies, a private last hop, a forged first entry.
+        ("198.51.100.1, 203.0.113.7, 172.70.1.1, 10.1.1.1", "10.0.0.2", 3, "203.0.113.7"),
         (None, "10.0.0.2", 1, "10.0.0.2"),  # no proxy on the way: the peer sent it
         ("203.0.113.7", "10.0.0.2", 2, "10.0.0.2"),  # fewer entries than proxies
         ("198.51.100.1, ", "10.0.0.2", 1, "10.0.0.2"),  # an empty entry is not an address

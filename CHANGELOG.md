@@ -21,6 +21,10 @@ Significant changes to the MCP Security Gateway are documented here.
   `MSG_TRUSTED_PROXY_HOPS` is lower than the number of proxies in front.
 - **`deploy/demo/Dockerfile`** runs the gateway and the poisoned example server
   in one container. **`render.yaml`** describes it as a free Render web service.
+- **The Render service trusts three proxies.** The first deploy assumed one.
+  `/sandbox` then showed three `X-Forwarded-For` entries on a request that sent
+  none, and a private address as the caller's. With one hop, every visitor
+  shared one rate-limit bucket. `MSG_TRUSTED_PROXY_HOPS` now accepts up to 5.
 - **The console shows a sandbox strip** with the public keys and both controls.
 - **CI builds, scans and smoke-tests the sandbox image**
   (`scripts/sandbox_smoke.py`). The mutation check has a third suite, with
