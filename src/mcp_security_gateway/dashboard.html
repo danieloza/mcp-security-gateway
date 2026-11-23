@@ -19,6 +19,18 @@
     <a class="skip-link" href="#main" id="skip-link">Skip to main content</a>
     <div class="app-shell">
       <div class="workspace">
+        <aside class="sandbox-strip" id="sandbox-strip" aria-label="Public sandbox" hidden>
+          <p>
+            <strong>Public sandbox.</strong>
+            <span id="sandbox-summary">Shared by every visitor and reset on a schedule.</span>
+            Keys: <code>msg-security-demo</code> (security admin), <code>msg-ops-demo</code> (operator).
+            They are public, so enter nothing real.
+          </p>
+          <div class="sandbox-actions">
+            <button class="button button-secondary" id="sandbox-rug-pull" type="button">Swap the upstream tool</button>
+            <button class="button button-secondary" id="sandbox-reset" type="button">Reset sandbox</button>
+          </div>
+        </aside>
         <header class="topbar">
           <a class="brand" href="#" aria-label="MCP Security Gateway: all modules">
             <span class="brand-mark" aria-hidden="true">

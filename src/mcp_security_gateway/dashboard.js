@@ -138,10 +138,36 @@ async function loadHealth() {
     statusNode.className = "system-status online";
     statusNode.lastChild.textContent = ` ${state.health.rate_limit_backend} controls online`;
     renderMetrics();
+    // A failing /sandbox must not mark the gateway itself as unavailable.
+    if (state.health.environment === "sandbox") loadSandbox().catch((error) => toast(error.message, true));
   } catch (error) {
     const statusNode = byId("system-status");
     statusNode.className = "system-status offline";
     statusNode.lastChild.textContent = " Gateway unavailable";
+    toast(error.message, true);
+  }
+}
+
+// Only a gateway started with MSG_ENVIRONMENT=sandbox serves /sandbox.
+async function loadSandbox() {
+  const sandbox = await api("/sandbox");
+  const minutes = Math.max(1, Math.ceil(sandbox.next_reset_in_seconds / 60));
+  byId("sandbox-summary").textContent =
+    `Shared by every visitor and reset every ${sandbox.reset_every_minutes} min (next in about ${minutes} min), and on every restart.`;
+  byId("sandbox-strip").hidden = false;
+}
+
+async function sandboxAction(path, message) {
+  if (!state.key) {
+    toast("Connect with msg-security-demo first.", true);
+    byId("api-key").focus();
+    return;
+  }
+  try {
+    await api(path, { method: "POST", body: "{}" });
+    toast(message);
+    await loadAuthenticatedData();
+  } catch (error) {
     toast(error.message, true);
   }
 }
@@ -736,6 +762,10 @@ byId("refresh-button").addEventListener("click", async () => {
   }
 });
 
+byId("sandbox-rug-pull").addEventListener("click", () =>
+  sandboxAction("/sandbox/rug-pull", "The test server now serves a new search_notes description. Call it, or sync again."),
+);
+byId("sandbox-reset").addEventListener("click", () => sandboxAction("/sandbox/reset", "Sandbox reset to its starting data."));
 byId("guided-demo-button").addEventListener("click", runGuidedDefense);
 byId("attack-lab-button").addEventListener("click", runAttackLab);
 

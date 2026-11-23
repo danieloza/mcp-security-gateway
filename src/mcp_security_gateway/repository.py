@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -235,6 +236,29 @@ class SQLiteRepository:
                 """
             )
             self._seed(connection)
+
+    def reset(self) -> None:
+        """Replace every row with a freshly seeded database. For the public sandbox only.
+
+        A new database is built in a temporary file and copied over this one with
+        SQLite's backup API, which also truncates the file. The file itself stays:
+        another connection may still hold it open.
+        """
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as scratch:
+            fresh = SQLiteRepository(f"sqlite:///{Path(scratch) / 'fresh.db'}")
+            source = fresh._connect()
+            target = self._connect()
+            try:
+                source.backup(target)
+            finally:
+                source.close()
+                target.close()
+
+    def size_bytes(self) -> int:
+        try:
+            return self.path.stat().st_size
+        except FileNotFoundError:
+            return 0
 
     def _migrate_legacy_columns(self, connection: sqlite3.Connection) -> None:
         migrations = {
