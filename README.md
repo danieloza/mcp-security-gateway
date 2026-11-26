@@ -391,6 +391,12 @@ asyncio.run(main())
 n8n passes MCP tool names to the model unchanged, so an agent with an OpenAI
 model needs the parameter. The next section explains why.
 
+When the gateway refuses a call, n8n hands the model only the result text, not
+`structuredContent`, so the agent sees that a call was blocked but not why. The
+reason is in the gateway's audit trail (`GET /requests`). Do not rely on the
+agent's summary of a refusal: in the run below, it reported a tool blocked after
+a rug pull as "no matching notes".
+
 ### Tool names for function-calling models
 
 MCP tool names may contain dots: `kb.search` is a valid MCP name. OpenAI and
@@ -432,15 +438,16 @@ Without the parameter, tool names are unchanged.
   is rejected with `400`.
 
 Verification boundary, as run on 2026-11-17 against a local gateway on a fresh
-database (the last two rows: 2026-11-25):
+database, unless a row gives another date:
 
 | Client | What was run | Result |
 | --- | --- | --- |
 | MCP Python SDK 2.3.0 | the snippet above, extended to one call per decision | negotiated `2025-11-25`; `tools/list` returned the three tools; `kb.search` → `executed`, `repo.write_file` → `approval_required`, `repo.write_file` with a secret → `denied` (`isError: true`); `ping` answered |
 | Claude Code 2.1.248 | the `claude mcp add` command above, then `claude mcp list` | `✔ Connected` |
 | Cursor, VS Code | not run | the snippets follow each client's documented remote HTTP format |
-| n8n Cloud 2.49.6, AI Agent with OpenAI `gpt-5-mini` | MCP Client Tool on the public sandbox, before `tool_names` existed | `tools/list` returned the three tools; the first model request failed, because OpenAI rejected `kb.search` as a function name |
-| MCP Python SDK 2.3.0 | seven calls covering every decision, through `?tool_names=underscore`, against a local sandbox | all five aliases are valid function names; every decision matched the canonical names, including `response_blocked` and the denial after a changed upstream tool |
+| n8n Cloud 2.49.6, AI Agent with OpenAI `gpt-5-mini` | 2026-11-25: MCP Client Tool on the public sandbox, before `tool_names` existed | `tools/list` returned the three tools; the first model request failed, because OpenAI rejected `kb.search` as a function name |
+| MCP Python SDK 2.3.0 | 2026-11-25: seven calls covering every decision, through `?tool_names=underscore`, against a local sandbox | all five aliases are valid function names; every decision matched the canonical names, including `response_blocked` and the denial after a changed upstream tool |
+| n8n Cloud 2.49.6, AI Agent with OpenAI `gpt-5-mini` | 2026-11-26: the same workflow with `?tool_names=underscore` on the public sandbox, one chat message per decision; `kb.search` read from n8n's log, every other decision from `GET /requests` | `kb.search` → `executed`; `repo.write_file` → held for approval; `repo.write_file` with a secret → `blocked` by argument DLP; the `payments` restart → hard-blocked; `notes.search_notes` → `executed`, then output withheld as instructions to the agent, then `blocked` after the rug pull. The model also made two calls nobody asked for, a `staging-api` restart and a `kb.search` with the secret in the query; both were blocked. The audit trail records the canonical names |
 
 The Claude Code handshake, as observed on the wire:
 
