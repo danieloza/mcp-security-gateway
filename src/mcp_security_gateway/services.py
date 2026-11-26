@@ -39,6 +39,7 @@ from mcp_security_gateway.security import (
 )
 from mcp_security_gateway.injection import inspect_value
 from mcp_security_gateway.state import InMemoryRateLimitStore, RateLimitStore
+from mcp_security_gateway.tool_names import alias_map, resolve
 from mcp_security_gateway.tool_registry import (
     manifest_as_protocol_tool,
     public_manifest,
@@ -211,10 +212,29 @@ class GatewayService:
     def list_tools(self, auth: AuthContext) -> list[ToolManifest]:
         return self.repo.list_tools(auth.user.organization_id)
 
-    def protocol_tools(self, auth: AuthContext) -> list[dict[str, Any]]:
+    def protocol_tools(self, auth: AuthContext, name_style: str = "dotted") -> list[dict[str, Any]]:
+        manifests = self.list_tools(auth)
         # Only verified tools reach the agent: a quarantined tool's description
         # may be the poisoned text that caused the quarantine.
-        return [manifest_as_protocol_tool(item) for item in self.list_tools(auth) if item.trust_status == "verified"]
+        tools = [manifest_as_protocol_tool(item) for item in manifests if item.trust_status == "verified"]
+        if name_style == "dotted":
+            return tools
+        # Aliases come from every tool, quarantined ones too, so quarantining or
+        # restoring one tool never changes the alias of another.
+        alias_of = {canonical: alias for alias, canonical in alias_map(item.name for item in manifests).items()}
+        exposed = []
+        for tool in tools:
+            alias = alias_of.get(tool["name"])
+            if alias is None:
+                continue
+            tool["_meta"]["gateway/canonicalName"] = tool["name"]
+            tool["name"] = alias
+            exposed.append(tool)
+        return exposed
+
+    def canonical_tool_name(self, auth: AuthContext, name: str) -> str:
+        """Resolve an alias from `tools/list?tool_names=underscore` to the canonical name."""
+        return resolve(name, (item.name for item in self.list_tools(auth)))
 
     # --- Upstream MCP servers -------------------------------------------------
 

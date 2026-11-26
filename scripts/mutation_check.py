@@ -7,7 +7,7 @@ that leaves the tests green is a guard that no test protects.
 Run from the repository root, in the project's environment:
 
     python scripts/mutation_check.py            # every suite
-    python scripts/mutation_check.py proxy      # or: oauth, sandbox
+    python scripts/mutation_check.py proxy      # or: oauth, sandbox, names
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ MAIN = "src/mcp_security_gateway/main.py"
 OAUTH = "src/mcp_security_gateway/oauth.py"
 SANDBOX = "src/mcp_security_gateway/sandbox.py"
 SERVICES = "src/mcp_security_gateway/services.py"
+TOOL_NAMES = "src/mcp_security_gateway/tool_names.py"
 UPSTREAM = "src/mcp_security_gateway/upstream.py"
 
 # Each mutation: (guard, file, [(anchor, replacement), ...]). Every anchor must
@@ -50,8 +51,8 @@ SUITES: dict[str, tuple[str, list[tuple[str, str, list[tuple[str, str]]]]]] = {
                 ("if poisoned:", "if False:"),
             ]),
             ("quarantined tools listed to the agent", SERVICES, [
-                ('for item in self.list_tools(auth) if item.trust_status == "verified"]',
-                 "for item in self.list_tools(auth)]"),
+                ('for item in manifests if item.trust_status == "verified"]',
+                 "for item in manifests]"),
             ]),
             ("caller's credential passed upstream", UPSTREAM, [
                 ('if session:\n            headers["Mcp-Session-Id"] = session',
@@ -144,6 +145,29 @@ SUITES: dict[str, tuple[str, list[tuple[str, str, list[tuple[str, str]]]]]] = {
             ]),
             ("test server allowed off loopback", CONFIG, [
                 ('if scheme != "http" or host not in SANDBOX_FIXTURE_HOSTS:', "if False:"),
+            ]),
+        ],
+    ),
+    "names": (
+        "tests/test_tool_names.py",
+        [
+            ("characters outside the function-name set kept", TOOL_NAMES, [
+                ('alias = _UNSAFE.sub("_", canonical)', "alias = canonical"),
+            ]),
+            ("names over 64 characters not shortened", TOOL_NAMES, [
+                ("if len(alias) <= MAX_LENGTH:", "if True:"),
+            ]),
+            ("a shared alias handed to the first tool", TOOL_NAMES, [
+                ("if len(owners) > 1:", "if False:"),
+            ]),
+            ("underscore listing ignored", SERVICES, [
+                ('if name_style == "dotted":', "if True:"),
+            ]),
+            ("alias not resolved on tools/call", MAIN, [
+                ("name = service.canonical_tool_name(auth, name)", "pass"),
+            ]),
+            ("unknown name style accepted", MAIN, [
+                ("if tool_names not in NAME_STYLES:", "if False:"),
             ]),
         ],
     ),
