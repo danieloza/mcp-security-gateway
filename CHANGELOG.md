@@ -4,6 +4,21 @@ Significant changes to the MCP Security Gateway are documented here.
 
 ## [Unreleased]
 
+### Tool names for function-calling models
+
+- **`/mcp?tool_names=underscore` lists tools under aliases such as
+  `kb_search`.** OpenAI and Azure OpenAI reject a function name with a dot, and
+  n8n passes MCP names to the model unchanged. An n8n Cloud agent with an
+  OpenAI model failed on its first request: `Invalid 'tools[0].function.name'`.
+  Without the parameter, names are unchanged.
+- **`tools/call` resolves the alias to the canonical name before any policy
+  runs.** Manifests, approvals and the audit trail record only canonical names.
+- **An alias that two tools would share goes to neither.** Both stay callable by
+  their canonical names. A cached alias therefore never reaches a different tool
+  after an upstream sync.
+- **The mutation check has a fourth suite, `names`,** with six guards. The
+  existing guard against listing quarantined tools follows the refactored line.
+
 ### Public sandbox
 
 - **`MSG_ENVIRONMENT=sandbox`**, for a gateway that anyone may use. It keeps the

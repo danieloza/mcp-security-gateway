@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -56,6 +56,7 @@ from mcp_security_gateway.services import AuthContext, GatewayService
 from mcp_security_gateway.upstream import UpstreamRegistry, load_upstreams
 from mcp_security_gateway.state import RateLimitStore, build_rate_limit_store
 from mcp_security_gateway.tool_registry import public_manifest
+from mcp_security_gateway.tool_names import NAME_STYLES
 
 
 rate_limit_store = build_rate_limit_store(redis_url())
@@ -622,9 +623,15 @@ def create_app(
         mcp_method: str | None = Header(default=None, alias="Mcp-Method"),
         mcp_name: str | None = Header(default=None, alias="Mcp-Name"),
         protocol_version: str | None = Header(default=None, alias="MCP-Protocol-Version"),
+        tool_names: str = Query(default="dotted"),
         auth: AuthContext = Depends(get_mcp_auth),
         service: GatewayService = Depends(get_service),
     ) -> dict[str, Any] | Response:
+        if tool_names not in NAME_STYLES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"tool_names must be one of: {', '.join(NAME_STYLES)}.",
+            )
         if origin and origin.rstrip("/") not in allowed_origins():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -685,7 +692,7 @@ def create_app(
             return {
                 "jsonrpc": "2.0",
                 "id": payload.id,
-                "result": {"tools": service.protocol_tools(auth)},
+                "result": {"tools": service.protocol_tools(auth, tool_names)},
             }
         if payload.method != "tools/call":
             return {
@@ -715,6 +722,8 @@ def create_app(
                     payload.id, execution, "Approved tool call executed through the controlled adapter."
                 )
 
+            # Policy, approvals and the audit trail see only the canonical name.
+            name = service.canonical_tool_name(auth, name)
             manifest = service.repo.get_tool_by_name(auth.user.organization_id, name)
             if not manifest:
                 raise ValueError(f"Unknown MCP tool '{name}'.")

@@ -382,6 +382,41 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+### n8n (MCP Client Tool)
+
+- **Endpoint:** `http://127.0.0.1:8000/mcp?tool_names=underscore`
+- **Server Transport:** HTTP Streamable
+- **Authentication:** Bearer Auth, with the token `msg-ops-demo`
+
+n8n passes MCP tool names to the model unchanged, so an agent with an OpenAI
+model needs the parameter. The next section explains why.
+
+### Tool names for function-calling models
+
+MCP tool names may contain dots: `kb.search` is a valid MCP name. OpenAI and
+Azure OpenAI accept only function names that match `^[a-zA-Z0-9_-]{1,64}$`. A
+client that passes MCP names to the model unchanged fails on its first model
+request. On 2026-11-25, an n8n Cloud 2.49.6 agent with an OpenAI model got:
+`Invalid 'tools[0].function.name': string does not match pattern`.
+
+With `/mcp?tool_names=underscore`:
+
+- `tools/list` returns aliases such as `kb_search`, `repo_write_file` and
+  `ops_restart_service`, and keeps the canonical name in
+  `_meta["gateway/canonicalName"]`;
+- `tools/call` accepts the alias or the canonical name and resolves the alias
+  before any policy runs. Manifests, approvals and the audit trail record only
+  the canonical name;
+- each character outside `[a-zA-Z0-9_-]` becomes `_`. A name longer than 64
+  characters keeps its first 55 characters, then `_` and 8 hex characters of
+  its SHA-256;
+- when two tools would share an alias, neither gets it. Both drop out of the
+  underscore listing and stay callable by their canonical names. Giving the
+  alias to one of them would make the choice depend on which other tools
+  exist, so after an upstream sync a cached alias could reach a different tool.
+
+Without the parameter, tool names are unchanged.
+
 ### Protocol contract
 
 - negotiates MCP `2025-11-25` or `2025-06-18`; a client offering any other
@@ -392,16 +427,20 @@ asyncio.run(main())
 - requests without an `id`, or with a `null` id, are rejected with `400`;
 - an `MCP-Protocol-Version` header, when sent, must name a supported revision;
 - capabilities advertise `tools.listChanged: false`, because there is no
-  server-to-client stream (`GET /mcp` returns `405`).
+  server-to-client stream (`GET /mcp` returns `405`);
+- `tool_names` accepts `dotted` (the default) or `underscore`; any other value
+  is rejected with `400`.
 
 Verification boundary, as run on 2026-11-17 against a local gateway on a fresh
-database:
+database (the last two rows: 2026-11-25):
 
 | Client | What was run | Result |
 | --- | --- | --- |
 | MCP Python SDK 2.3.0 | the snippet above, extended to one call per decision | negotiated `2025-11-25`; `tools/list` returned the three tools; `kb.search` → `executed`, `repo.write_file` → `approval_required`, `repo.write_file` with a secret → `denied` (`isError: true`); `ping` answered |
 | Claude Code 2.1.248 | the `claude mcp add` command above, then `claude mcp list` | `✔ Connected` |
 | Cursor, VS Code | not run | the snippets follow each client's documented remote HTTP format |
+| n8n Cloud 2.49.6, AI Agent with OpenAI `gpt-5-mini` | MCP Client Tool on the public sandbox, before `tool_names` existed | `tools/list` returned the three tools; the first model request failed, because OpenAI rejected `kb.search` as a function name |
+| MCP Python SDK 2.3.0 | seven calls covering every decision, through `?tool_names=underscore`, against a local sandbox | all five aliases are valid function names; every decision matched the canonical names, including `response_blocked` and the denial after a changed upstream tool |
 
 The Claude Code handshake, as observed on the wire:
 
