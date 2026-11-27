@@ -4,6 +4,22 @@ Significant changes to the MCP Security Gateway are documented here.
 
 ## [Unreleased]
 
+### A real retrieval upstream in the sandbox
+
+- **The sandbox runs a second upstream, the Danex retrieval server** from
+  danex-rag-service (`up_rag`, tools `rag.search` and `rag.get_trace`). Agents
+  get ranked passages from a real FTS5 index with source files, through the same
+  pinning, policy and output inspection as any upstream.
+- **The Dockerfile fetches it at one pinned commit** and checks that the fetched
+  tree is that commit. The CI end-to-end run reads the same line, so the sandbox
+  and the test cannot run different versions. A test rejects anything but a full
+  commit hash there.
+- **`scripts/e2e_proxy.py` and `scripts/sandbox_smoke.py` check it.** After a
+  sync, a search executes through the gateway, its trace reads back, and the
+  audit trail records the call.
+- **The sandbox's upstream list moved to `deploy/demo/upstreams.json`.** A test
+  keeps its first entry equal to `examples/upstreams.json`.
+
 ### Tool names for function-calling models
 
 - **`/mcp?tool_names=underscore` lists tools under aliases such as

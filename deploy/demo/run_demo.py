@@ -1,8 +1,9 @@
-"""Start the public sandbox: the poisoned test server on loopback, then the gateway.
+"""Start the public sandbox: two upstream MCP servers on loopback, then the gateway.
 
-Both run as children of this process. When either exits, the other is stopped
-and the container exits too, so the host restarts a whole, fresh sandbox.
-Standard library only.
+The upstreams are the poisoned test server and the Danex retrieval server
+(danex-rag-service at the commit the Dockerfile pins). All three run as children
+of this process. When one exits, the others are stopped and the container exits
+too, so the host restarts a whole, fresh sandbox. Standard library only.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 FIXTURE_PORT = 8100  # examples/poisoned_server.py binds 127.0.0.1:8100
+RAG_PORT = 8101  # upstreams.json points up_rag here
 DATA_DIR = Path(os.environ.get("MSG_SANDBOX_DATA_DIR", "/tmp/msg-sandbox"))
 
 
@@ -55,12 +57,17 @@ def main() -> int:
     env, port = sandbox_environment()
 
     fixture = subprocess.Popen([sys.executable, str(HERE / "poisoned_server.py")], env=env)
-    try:
-        wait_for_port(FIXTURE_PORT)
-    except RuntimeError as exc:
-        print(f"sandbox: the test server did not start: {exc}", file=sys.stderr)
-        fixture.terminate()
-        return 1
+    # The retrieval server keeps its index and traces with the rest of the sandbox data.
+    rag_env = {**env, "DANEX_MCP_PORT": str(RAG_PORT), "DANEX_MCP_DB": str(DATA_DIR / "rag.sqlite3")}
+    rag = subprocess.Popen([sys.executable, str(HERE / "rag" / "mcp_server.py")], env=rag_env)
+    for name, process, upstream_port in (("test", fixture, FIXTURE_PORT), ("retrieval", rag, RAG_PORT)):
+        try:
+            wait_for_port(upstream_port)
+        except RuntimeError as exc:
+            print(f"sandbox: the {name} server did not start: {exc}", file=sys.stderr)
+            fixture.terminate()
+            rag.terminate()
+            return 1
 
     gateway = subprocess.Popen(
         [
@@ -72,7 +79,7 @@ def main() -> int:
         ],
         env=env,
     )
-    children = (fixture, gateway)
+    children = (fixture, rag, gateway)
 
     def stop(signum: int, frame: object) -> None:
         for child in children:

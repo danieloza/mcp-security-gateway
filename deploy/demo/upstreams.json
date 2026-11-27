@@ -1,0 +1,23 @@
+[
+  {
+    "id": "up_notes",
+    "name": "Notes MCP (poisoned test fixture)",
+    "url": "http://127.0.0.1:8100/mcp",
+    "prefix": "notes",
+    "organization_id": "org_danex",
+    "scope": "notes:read",
+    "default_risk": "low",
+    "risk": {
+      "export_notes": "high"
+    }
+  },
+  {
+    "id": "up_rag",
+    "name": "Danex retrieval MCP (danex-rag-service)",
+    "url": "http://127.0.0.1:8101/mcp",
+    "prefix": "rag",
+    "organization_id": "org_danex",
+    "scope": "rag:read",
+    "default_risk": "low"
+  }
+]

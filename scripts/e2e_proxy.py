@@ -11,6 +11,11 @@ free loopback ports, with a throwaway database, then plays one scenario:
    and the tool disappears from the agent's list;
 5. a new sync reports the rug pull, with no second rug-pull incident.
 
+With `DANEX_RAG_DIR` set to a checkout of danex-rag-service, it also starts that
+repository's retrieval server as a second upstream and plays one more step, as
+a second agent: after a sync, a search executes through the gateway and its
+trace can be read back. CI sets it to the commit the sandbox Dockerfile pins.
+
 Every step is asserted. The script exits non-zero on the first failure and stops
 both servers either way. Run it from the repository root:
 
@@ -41,6 +46,9 @@ import ci_summary  # scripts/ci_summary.py
 ROOT = Path(__file__).resolve().parents[1]
 OPERATOR = {"Authorization": "Bearer msg-ops-demo"}
 SECURITY = {"Authorization": "Bearer msg-security-demo"}
+# The retrieval step runs as a second agent: the per-user limit is five calls a minute.
+PLATFORM = {"Authorization": "Bearer msg-platform-demo"}
+RAG_QUESTION = "W jakim terminie klient może zgłosić reklamację?"
 ROWS: list[tuple[str, str]] = []
 
 
@@ -63,6 +71,18 @@ def wait_until_up(url: str, process: subprocess.Popen[bytes], seconds: float = 3
                 return
         time.sleep(0.3)
     raise RuntimeError(f"{url} did not come up within {seconds} s")
+
+
+def wait_until_listening(port: int, process: subprocess.Popen[bytes], seconds: float = 30) -> None:
+    """For servers whose GET /mcp opens a long-lived event stream: wait for the port instead."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"port {port} exited early with code {process.returncode}")
+        with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return
+        time.sleep(0.3)
+    raise RuntimeError(f"nothing listens on port {port} after {seconds} s")
 
 
 def root_cause(exc: BaseException) -> BaseException:
@@ -93,8 +113,8 @@ class Agent:
 
 
 @contextlib.asynccontextmanager
-async def connect(gateway: str):  # type: ignore[no-untyped-def]
-    http = create_mcp_http_client(headers=OPERATOR)
+async def connect(gateway: str, headers: dict[str, str] = OPERATOR):  # type: ignore[no-untyped-def]
+    http = create_mcp_http_client(headers=headers)
     async with http, streamable_http_client(f"{gateway}/mcp", http_client=http) as streams:
         async with ClientSession(streams[0], streams[1]) as session:
             await session.initialize()
@@ -157,13 +177,41 @@ async def scenario(gateway: str, upstream: str) -> None:
             check("incidents", len(rug_pulls) == 1, f"{len(rug_pulls)} rug-pull incident")
 
 
+def upstream_payload(structured: dict[str, Any]) -> dict[str, Any]:
+    """The upstream's own structured result, inside the gateway's `result` envelope."""
+    return (structured.get("result") or {}).get("structuredContent") or {}
+
+
+async def rag_scenario(gateway: str) -> None:
+    with httpx.Client(base_url=gateway, timeout=15) as rest:
+        synced = {item["tool"]: item["status"] for item in rest.post("/upstreams/up_rag/sync", headers=SECURITY).json()["results"]}
+        check("rag sync", synced == {"rag.search": "pinned", "rag.get_trace": "pinned"}, json.dumps(synced))
+        async with connect(gateway, PLATFORM) as agent:
+            found, is_error = await agent.call("rag.search", {"question": RAG_QUESTION, "limit": 2})
+            answer = upstream_payload(found)
+            evidence = answer.get("results", [])
+            top = evidence[0]["source"] if evidence else None
+            check(
+                "rag search",
+                found.get("status") == "executed" and not is_error and top == "regulamin_salonu_2026.txt",
+                f"{found.get('status')}, isError={is_error}, top source {top}",
+            )
+            traced, is_error = await agent.call("rag.get_trace", {"query_id": answer.get("query_id", "")})
+            route = upstream_payload(traced).get("route")
+            check("rag trace", traced.get("status") == "executed" and not is_error and route == "mcp_lexical", f"{traced.get('status')}, route {route}")
+        audit = rest.get(f"/requests/{found['requestId']}", headers=OPERATOR).json()
+        check("rag audit", audit["tool_name"] == "rag.search" and audit["execution_status"] == "executed",
+              f"{audit['tool_name']} {audit['execution_status']}")
+
+
 def write_summary(failed: bool) -> None:
     """Show the steps on the GitHub Actions run page, when running there."""
     import importlib.metadata
 
     ci_summary.append(
         "Proxy mode end to end",
-        "The poisoned example server and the gateway over HTTP, with MCP Python SDK "
+        "The poisoned example server, the Danex retrieval server (when DANEX_RAG_DIR is set) "
+        "and the gateway over HTTP, with MCP Python SDK "
         f"{importlib.metadata.version('mcp')} as the agent.",
         ["Step", "Observed"],
         ROWS,
@@ -174,12 +222,17 @@ def write_summary(failed: bool) -> None:
 def main() -> int:
     import importlib.metadata
 
+    rag_dir = os.environ.get("DANEX_RAG_DIR", "").strip()
     with tempfile.TemporaryDirectory(prefix="gateway-e2e-") as tmp:
-        upstream_port, gateway_port = free_ports(2)
+        upstream_port, gateway_port, rag_port = free_ports(3)
         upstream_url = f"http://127.0.0.1:{upstream_port}"
         gateway_url = f"http://127.0.0.1:{gateway_port}"
+        rag_url = f"http://127.0.0.1:{rag_port}"
         config = json.loads((ROOT / "examples" / "upstreams.json").read_text(encoding="utf-8"))
         config[0]["url"] = f"{upstream_url}/mcp"
+        if rag_dir:
+            sandbox = json.loads((ROOT / "deploy" / "demo" / "upstreams.json").read_text(encoding="utf-8"))
+            config.append({**next(item for item in sandbox if item["id"] == "up_rag"), "url": f"{rag_url}/mcp"})
         upstreams = Path(tmp) / "upstreams.json"
         upstreams.write_text(json.dumps(config), encoding="utf-8")
         env = {
@@ -192,8 +245,17 @@ def main() -> int:
         processes: dict[str, subprocess.Popen[bytes]] = {}
         failed = False
         with contextlib.ExitStack() as stack:
-            logs = {name: stack.enter_context(open(Path(tmp) / f"{name}.log", "wb")) for name in ("upstream", "gateway")}
+            names = ("upstream", "gateway", *(("retrieval",) if rag_dir else ()))
+            logs = {name: stack.enter_context(open(Path(tmp) / f"{name}.log", "wb")) for name in names}
             try:
+                if rag_dir:
+                    processes["retrieval"] = subprocess.Popen(
+                        [sys.executable, str(Path(rag_dir) / "mcp_server.py")],
+                        cwd=rag_dir,
+                        env={**env, "DANEX_MCP_PORT": str(rag_port), "DANEX_MCP_DB": str(Path(tmp) / "rag.sqlite3")},
+                        stdout=logs["retrieval"], stderr=subprocess.STDOUT,
+                    )
+                    wait_until_listening(rag_port, processes["retrieval"])
                 processes["upstream"] = subprocess.Popen(
                     [sys.executable, "-c",
                      "import sys, uvicorn; sys.path.insert(0, 'examples'); import poisoned_server; "
@@ -208,6 +270,10 @@ def main() -> int:
                 wait_until_up(f"{upstream_url}/mcp", processes["upstream"])
                 wait_until_up(f"{gateway_url}/health", processes["gateway"])
                 asyncio.run(scenario(gateway_url, upstream_url))
+                if rag_dir:
+                    asyncio.run(rag_scenario(gateway_url))
+                else:
+                    ROWS.append(("rag", "skipped: DANEX_RAG_DIR is not set"))
             except Exception as exc:  # report, then show the server logs
                 failed = True
                 print(f"FAILED: {root_cause(exc)}")
@@ -222,7 +288,7 @@ def main() -> int:
             print(f"  {step:<{width}}  {observed}")
         write_summary(failed)
         if failed:
-            for name in ("upstream", "gateway"):
+            for name in names:
                 print(f"--- {name} log ---")
                 print((Path(tmp) / f"{name}.log").read_text(encoding="utf-8", errors="replace")[-4000:])
             return 1
