@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from mcp_security_gateway.main import build_sandbox, create_app
 from mcp_security_gateway.repository import SQLiteRepository
 from mcp_security_gateway.sandbox import client_ip
 from mcp_security_gateway.state import InMemoryRateLimitStore
-from mcp_security_gateway.upstream import InMemoryUpstream, UpstreamConfig, UpstreamRegistry
+from mcp_security_gateway.upstream import InMemoryUpstream, UpstreamConfig, UpstreamRegistry, load_upstreams
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "examples"))
 import poisoned_server  # noqa: E402
@@ -258,3 +259,25 @@ def test_the_test_server_being_down_is_reported_not_fatal(
     assert client.post("/sandbox/rug-pull", headers=SECURITY).status_code == 502
     assert client.post("/sandbox/reset", headers=SECURITY).status_code == 200
     assert sandbox.resets == 1
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_the_sandbox_upstreams_keep_the_example_entry_and_add_retrieval() -> None:
+    example = json.loads((ROOT / "examples" / "upstreams.json").read_text(encoding="utf-8"))
+    sandbox_file = ROOT / "deploy" / "demo" / "upstreams.json"
+    # The poisoned server's entry must not drift between the docs and the sandbox.
+    assert json.loads(sandbox_file.read_text(encoding="utf-8"))[0] == example[0]
+    configs = load_upstreams(str(sandbox_file))
+    assert [(item.id, item.prefix, item.url) for item in configs] == [
+        ("up_notes", "notes", "http://127.0.0.1:8100/mcp"),
+        ("up_rag", "rag", "http://127.0.0.1:8101/mcp"),
+    ]
+
+
+def test_the_sandbox_pins_the_retrieval_server_to_one_full_commit() -> None:
+    dockerfile = (ROOT / "deploy" / "demo" / "Dockerfile").read_text(encoding="utf-8")
+    pins = re.findall(r"^ARG DANEX_RAG_COMMIT=(\S*)$", dockerfile, flags=re.MULTILINE)
+    # A branch or tag name could move under the sandbox; a full commit cannot.
+    assert len(pins) == 1 and re.fullmatch(r"[0-9a-f]{40}", pins[0])

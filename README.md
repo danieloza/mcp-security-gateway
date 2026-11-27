@@ -583,8 +583,11 @@ database with it.** To stop the stack and keep the data, use
 The sandbox runs at https://mcp-security-gateway-sandbox.onrender.com.
 
 `deploy/demo/Dockerfile` builds a sandbox that is safe to put online. It runs the
-gateway and the poisoned example server in one container, and starts with
-`MSG_ENVIRONMENT=sandbox` and the public demo keys:
+gateway and two upstream MCP servers in one container, and starts with
+`MSG_ENVIRONMENT=sandbox` and the public demo keys. The upstreams are the
+poisoned example server and the Danex retrieval server from
+[danex-rag-service](https://github.com/danieloza/danex-rag-service), fetched at
+the commit the Dockerfile pins:
 
 ```powershell
 docker build -f deploy/demo/Dockerfile -t mcp-security-gateway-sandbox .
@@ -594,6 +597,17 @@ docker run --rm -p 127.0.0.1:8010:8000 mcp-security-gateway-sandbox
 Open `http://127.0.0.1:8010/dashboard`. A strip at the top names the public
 keys. It also has a button that makes the test server swap a tool description,
 and a button that resets the sandbox.
+
+**The retrieval upstream** (`up_rag`, prefix `rag`, scope `rag:read`) gives
+agents a real search behind the gateway's controls. After a security admin syncs
+it, `rag.search` returns ranked passages from the Danex policy corpus with their
+source files, and `rag.get_trace` returns how a search was ranked. Both are
+read-only and low risk. The server ranks with SQLite FTS5 and the active
+retrieval profile's RRF settings; it serves no dense retrieval or generated
+answers. The gateway pins both tool definitions and inspects every result before
+the agent sees it, as for any upstream. The scheduled reset clears the gateway
+but not the retrieval server's traces, which hold the questions asked; those go
+when the container restarts.
 
 **Sandbox mode adds these limits to the gateway's own:**
 - **Per address:** 120 requests a minute per client address
@@ -616,8 +630,9 @@ and a button that resets the sandbox.
 
 [`render.yaml`](render.yaml) describes the sandbox as a free Render web service.
 Nothing deploys from it until the repository owner creates a Blueprint.
-`scripts/sandbox_smoke.py` checks the image in CI. It syncs the test server,
-makes a clean call, swaps the tool and checks that the next call is denied.
+`scripts/sandbox_smoke.py` checks the image in CI. It syncs the test server and
+makes a clean call, syncs the retrieval server and reads a search and its trace,
+then swaps the test server's tool and checks that the next call is denied.
 
 ## Testing
 
@@ -658,11 +673,14 @@ CI runs it on every pull request and on every push to `main`.
 `scripts/e2e_proxy.py` runs proxy mode end to end, over real HTTP. It starts
 the poisoned example server and the gateway on free loopback ports, uses the
 official MCP Python SDK as the agent, and asserts every step from the first sync
-to the rug pull. CI runs it too:
+to the rug pull. With `DANEX_RAG_DIR` pointing at a danex-rag-service checkout,
+it also starts the retrieval server and checks a search, its trace and its audit
+record, as a second agent. CI runs it with the commit the sandbox pins:
 
 ```powershell
 python -m pip install -e ".[e2e]"
 python scripts/e2e_proxy.py
+$env:DANEX_RAG_DIR = "..\danex-rag-service"; python scripts/e2e_proxy.py
 ```
 
 ## Production-shaped, Not Production-ready

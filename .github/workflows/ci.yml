@@ -83,7 +83,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[e2e]"
 
-      - name: Run the poisoned server and the gateway, with the MCP SDK as the agent
+      # The same commit the sandbox image runs: one source, the Dockerfile ARG.
+      - name: Fetch the Danex retrieval server at the commit the sandbox pins
+        run: |
+          commit="$(sed -n 's/^ARG DANEX_RAG_COMMIT=//p' deploy/demo/Dockerfile)"
+          git init -q "$RUNNER_TEMP/danex-rag"
+          git -C "$RUNNER_TEMP/danex-rag" fetch -q --depth 1 https://github.com/danieloza/danex-rag-service.git "$commit"
+          git -C "$RUNNER_TEMP/danex-rag" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/danex-rag" rev-parse HEAD)" = "$commit"
+          echo "DANEX_RAG_DIR=$RUNNER_TEMP/danex-rag" >> "$GITHUB_ENV"
+
+      - name: Run both upstream servers and the gateway, with the MCP SDK as the agent
         run: python scripts/e2e_proxy.py
 
   docker:
