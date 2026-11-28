@@ -43,7 +43,7 @@ services:
   # static demo keys. Tokens are fetched with the password grant of a public
   # client, which is acceptable for a scripted local demo and nothing else.
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.2-2
+    image: quay.io/keycloak/keycloak:26.8.2-3
     profiles: ["oauth"]
     command: ["start-dev", "--import-realm", "--hostname=http://127.0.0.1:8081"]
     ports:
